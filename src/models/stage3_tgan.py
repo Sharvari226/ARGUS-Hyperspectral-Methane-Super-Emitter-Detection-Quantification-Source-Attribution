@@ -599,10 +599,10 @@ def build_compliance_scorecard(
 
 
 def _risk_label(score: float) -> str:
-    if score < 30:  return "CRITICAL"
-    if score < 50:  return "HIGH"
-    if score < 70:  return "MEDIUM"
-    return "LOW"
+    if score < 20:  return "CRITICAL"   # was 30
+    if score < 40:  return "HIGH"       # was 50
+    if score < 58:  return "MEDIUM"     # was 70
+    return "LOW"                        # now reachable for low-flux, clean facilities             # only reachable if score >= 70 after penalties
 
 
 # ── Geometry helper ───────────────────────────────────────────────────────────

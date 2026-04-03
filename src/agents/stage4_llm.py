@@ -20,7 +20,7 @@ from src.models.stage2_economics import calculate_economic_impact, EconomicImpac
 from src.models.stage3_tgan import AttributionResult
 
 
-# ── Model — updated from decommissioned llama-3.1-70b-versatile ──
+# ── Model ─────────────────────────────────────────────────────────
 _DEFAULT_MODEL = "llama-3.3-70b-versatile"
 
 
@@ -37,7 +37,7 @@ def _get_client() -> OpenAI | None:
     )
 
 
-# ── Tool definitions (OpenAI function-calling format) ─────────────
+# ── Tool definitions ──────────────────────────────────────────────
 
 TOOLS = [
     {
@@ -62,8 +62,8 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "flux_kg_hr":     {"type": "number"},
-                    "duration_days":  {"type": "number"},
+                    "flux_kg_hr":    {"type": "number"},
+                    "duration_days": {"type": "number"},
                 },
                 "required": ["flux_kg_hr", "duration_days"],
             },
@@ -145,6 +145,16 @@ Always complete all 5 steps.
 """.strip()
 
 
+# ── Geometry-safe JSON encoder ────────────────────────────────────
+
+class _GeoEncoder(json.JSONEncoder):
+    """Converts Shapely / GeoJSON geometry objects to dicts before serialising."""
+    def default(self, obj):
+        if hasattr(obj, "__geo_interface__"):
+            return obj.__geo_interface__
+        return super().default(obj)
+
+
 # ── Tool executor ─────────────────────────────────────────────────
 
 class ToolExecutor:
@@ -154,15 +164,19 @@ class ToolExecutor:
         record = get_facility_by_id(facility_id)
         if record is None:
             return {"error": f"Facility {facility_id} not found"}
-        record["regulatory_contact"] = {
-            "authority": "Central Pollution Control Board (CPCB)",
+
+        # Convert any Shapely geometry fields to plain GeoJSON dicts
+        for key, val in list(record.items()):
+            if hasattr(val, "__geo_interface__"):
+                record[key] = val.__geo_interface__
+
+        # Ensure regulatory_contact exists
+        record.setdefault("regulatory_contact", {
+            "authority": "CPCB",
             "email":     "enforcement@cpcb.nic.in",
             "phone":     "+91-11-43102030",
-        }
-        record["outstanding_actions"] = (
-            "Prior NOV issued — compliance deadline missed"
-            if record.get("violations_12mo", 0) >= 3 else "None"
-        )
+        })
+
         return record
 
     @staticmethod
@@ -189,17 +203,22 @@ class ToolExecutor:
         rng   = np.random.default_rng(abs(hash(operator_name)) % 2**32)
         n_evt = int(rng.integers(1, 7))
         now   = datetime.utcnow()
-        events = [{
-            "detection_date": (now - timedelta(days=int(rng.integers(1, lookback_days)))).strftime("%Y-%m-%d"),
-            "facility_id":    f"FAC-{rng.integers(0, 9999):04d}",
-            "flux_kg_hr":     round(float(rng.uniform(80, 600)), 1),
-            "status":         rng.choice(["NOV Issued", "Fine Paid", "Under Investigation"]),
-            "fine_usd":       round(float(rng.uniform(5000, 250000))),
-        } for _ in range(n_evt)]
+        events = [
+            {
+                "detection_date": (now - timedelta(days=int(rng.integers(1, lookback_days)))).strftime("%Y-%m-%d"),
+                "facility_id":    f"FAC-{rng.integers(0, 9999):04d}",
+                "flux_kg_hr":     round(float(rng.uniform(80, 600)), 1),
+                "status":         rng.choice(["NOV Issued", "Fine Paid", "Under Investigation"]),
+                "fine_usd":       round(float(rng.uniform(5000, 250000))),
+            }
+            for _ in range(n_evt)
+        ]
         events.sort(key=lambda x: x["detection_date"], reverse=True)
         return {
-            "operator": operator_name, "total_events": n_evt,
-            "repeat_offender": n_evt >= 3, "events": events,
+            "operator":        operator_name,
+            "total_events":    n_evt,
+            "repeat_offender": n_evt >= 3,
+            "events":          events,
             "total_fines_usd": sum(e["fine_usd"] for e in events),
         }
 
@@ -212,9 +231,9 @@ class ToolExecutor:
         confidence_pct: float = 95.0, violations_12mo: int = 0,
     ) -> dict:
         detection_date = detection_date or datetime.utcnow().strftime("%Y-%m-%d")
-        notice_id  = f"NOV-ARGUS-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
-        deadline   = (datetime.utcnow() + timedelta(days=30)).strftime("%d %B %Y")
-        notice_md  = f"""
+        notice_id = f"NOV-ARGUS-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        deadline  = (datetime.utcnow() + timedelta(days=30)).strftime("%d %B %Y")
+        notice_md = f"""
 # NOTICE OF VIOLATION — {notice_id}
 **Date:** {detection_date} | **Authority:** CPCB / MoEF&CC
 
@@ -240,9 +259,12 @@ Payment Deadline: {deadline}
         """.strip()
         logger.info(f"NOV drafted: {notice_id} for {operator}")
         return {
-            "notice_id": notice_id, "notice_md": notice_md,
-            "deadline": deadline, "fine_usd": total_fine_usd,
-            "fine_inr": total_fine_inr, "facility_id": facility_id,
+            "notice_id": notice_id,
+            "notice_md": notice_md,
+            "deadline":  deadline,
+            "fine_usd":  total_fine_usd,
+            "fine_inr":  total_fine_inr,
+            "facility_id": facility_id,
         }
 
     @staticmethod
@@ -259,8 +281,10 @@ Payment Deadline: {deadline}
             "P4 — LOW"
         )
         return {
-            "flux_kg_hr": flux_kg_hr, "co2e_tonnes": round(co2e_t, 2),
-            "priority_level": priority, "facility_type": facility_type,
+            "flux_kg_hr":       flux_kg_hr,
+            "co2e_tonnes":      round(co2e_t, 2),
+            "priority_level":   priority,
+            "facility_type":    facility_type,
             "global_cars_equiv": round(co2e_t / 4.6),
         }
 
@@ -272,9 +296,9 @@ class ARGUSAgent:
     def __init__(self):
         self.client   = _get_client()
         self.executor = ToolExecutor()
-        # Use config model but fall back to known-good model if config still has old value
-        _cfg_model = cfg["stage4"].get("model", _DEFAULT_MODEL)
-        self.model = _DEFAULT_MODEL if "3.1" in _cfg_model else _cfg_model
+        _cfg_model    = cfg["stage4"].get("model", _DEFAULT_MODEL)
+        # Guard against stale config pointing at decommissioned model
+        self.model    = _DEFAULT_MODEL if "3.1" in _cfg_model else _cfg_model
 
     def process_detection(
         self,
@@ -320,10 +344,21 @@ class ARGUSAgent:
             msg        = response.choices[0].message
             tool_calls = msg.tool_calls or []
 
-            messages.append({"role": "assistant", "content": msg.content or "", "tool_calls": [
-                {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                for tc in tool_calls
-            ]})
+            messages.append({
+                "role":       "assistant",
+                "content":    msg.content or "",
+                "tool_calls": [
+                    {
+                        "id":       tc.id,
+                        "type":     "function",
+                        "function": {
+                            "name":      tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in tool_calls
+                ],
+            })
 
             if not tool_calls:
                 results["final_summary"] = msg.content or ""
@@ -334,31 +369,33 @@ class ARGUSAgent:
                 inputs = json.loads(tc.function.arguments)
                 logger.info(f"ARGUSAgent: calling {name}")
 
-                fn = getattr(ToolExecutor, name, None)
+                fn          = getattr(ToolExecutor, name, None)
                 result_data = fn(**inputs) if fn else {"error": f"Unknown tool {name}"}
 
-                if name == "lookup_operator":              results["operator_record"] = result_data
-                elif name == "calculate_penalty":          results["penalty"]         = result_data
-                elif name == "query_historical_violations": results["history"]        = result_data
-                elif name == "draft_notice":               results["notice"]          = result_data
-                elif name == "assess_climate_risk":        results["climate_risk"]    = result_data
+                if name == "lookup_operator":               results["operator_record"] = result_data
+                elif name == "calculate_penalty":           results["penalty"]         = result_data
+                elif name == "query_historical_violations": results["history"]         = result_data
+                elif name == "draft_notice":                results["notice"]          = result_data
+                elif name == "assess_climate_risk":         results["climate_risk"]    = result_data
 
+                # _GeoEncoder handles any residual Shapely geometry objects
                 messages.append({
                     "role":         "tool",
                     "tool_call_id": tc.id,
-                    "content":      json.dumps(result_data),
+                    "content":      json.dumps(result_data, cls=_GeoEncoder),
                 })
 
         return results
 
-    def _mock_result(self, detection, attribution, flux_kg_hr) -> dict:
+    def _mock_result(self, detection: dict, attribution: AttributionResult, flux_kg_hr: float) -> dict:
         penalty = ToolExecutor.calculate_penalty(flux_kg_hr, 30.0)
         notice  = ToolExecutor.draft_notice(
             operator=attribution.operator,
             facility_id=attribution.facility_id,
             facility_name=attribution.facility_name,
             facility_type=attribution.facility_type,
-            flux_kg_hr=flux_kg_hr, duration_days=30.0,
+            flux_kg_hr=flux_kg_hr,
+            duration_days=30.0,
             co2e_tonnes=penalty["co2e_tonnes"],
             total_fine_usd=penalty["total_liability_usd"],
             total_fine_inr=penalty["total_liability_inr"],
@@ -366,9 +403,12 @@ class ARGUSAgent:
         )
         risk = ToolExecutor.assess_climate_risk(flux_kg_hr, attribution.facility_type)
         return {
-            "notice": notice, "penalty": penalty, "climate_risk": risk,
-            "history": None, "operator_record": None,
-            "final_summary": f"NOV generated for {attribution.operator} — {flux_kg_hr:.0f} kg/hr",
+            "notice":          notice,
+            "penalty":         penalty,
+            "climate_risk":    risk,
+            "history":         None,
+            "operator_record": None,
+            "final_summary":   f"NOV generated for {attribution.operator} — {flux_kg_hr:.0f} kg/hr",
         }
 
 
@@ -393,8 +433,10 @@ class BatchEnforcementProcessor:
                 continue
             try:
                 result = self.agent.process_detection(
-                    detection=det, attribution=attr,
-                    flux_kg_hr=flux.flux_kg_hr, co2e_kg_hr=flux.co2e_kg_hr,
+                    detection=det,
+                    attribution=attr,
+                    flux_kg_hr=flux.flux_kg_hr,
+                    co2e_kg_hr=flux.co2e_kg_hr,
                 )
                 result["detection_id"] = det.get("label_id", det.get("detection_id", 0))
                 result["facility_id"]  = attr.facility_id

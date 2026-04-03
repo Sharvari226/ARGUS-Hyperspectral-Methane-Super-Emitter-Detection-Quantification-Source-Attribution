@@ -293,7 +293,8 @@ def extract_plume_detections(
     lat_max:   float,
     lon_min:   float,
     lon_max:   float,
-    prob_threshold:  float = 0.5,
+    prob_threshold:  float = 0.35,
+    min_pixels: int = 2,
     conf_threshold:  float | None = None,
 ) -> list[dict]:
     """
@@ -328,17 +329,26 @@ def extract_plume_detections(
         mean_prob = float(probs[region_mask].mean())
         mean_var  = float(varis[region_mask].mean())
 
-        detections.append({
-            "label_id":        label_id,
-            "centroid_lat":    c_lat,
-            "centroid_lon":    c_lon,
-            "pixel_area":      area,
-            "mean_probability": mean_prob,
-            "epistemic_variance": mean_var,
-            "high_confidence": mean_var < conf_threshold,
-            "pixel_ys":        ys.tolist(),
-            "pixel_xs":        xs.tolist(),
-        })
+        def extract_plume_detections(
+            mask_mean: torch.Tensor,
+            mask_var:  torch.Tensor,
+            lat_min:   float,
+            lat_max:   float,
+            lon_min:   float,
+            lon_max:   float,
+            prob_threshold:  float = 0.35,   # was 0.5 — catches diffuse low emitters
+            min_pixels:      int   = 2,      # was hardcoded 4 — allow smaller plumes
+            conf_threshold:  float | None = None,
+        ) -> list[dict]:
+            conf_threshold = conf_threshold or cfg["pipeline"]["uncertainty_max"]
+
+    mask  = (mask_mean > prob_threshold).numpy().astype(np.uint8)
+    ...
+    for label_id in range(1, n_features + 1):
+        region_mask = labeled == label_id
+        ys, xs = np.where(region_mask)
+        if len(ys) < min_pixels:   # was `< 4` hardcoded
+            continue
 
     logger.info(
         f"PlumeSegmenter: {len(detections)} plumes detected "
