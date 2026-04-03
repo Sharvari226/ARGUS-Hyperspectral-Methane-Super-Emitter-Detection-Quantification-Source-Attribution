@@ -1,7 +1,7 @@
 """
 src/agents/stage4_llm.py  — Groq edition
 ─────────────────────────────────────────
-Uses Groq API (free tier) with Llama-3.1-70B.
+Uses Groq API (free tier) with Llama-3.3-70B.
 OpenAI-compatible interface — same tool calling pattern.
 """
 from __future__ import annotations
@@ -18,6 +18,10 @@ from src.utils.config import cfg
 from src.data.facility_db import get_facility_by_id
 from src.models.stage2_economics import calculate_economic_impact, EconomicImpact
 from src.models.stage3_tgan import AttributionResult
+
+
+# ── Model — updated from decommissioned llama-3.1-70b-versatile ──
+_DEFAULT_MODEL = "llama-3.3-70b-versatile"
 
 
 # ── Groq client ───────────────────────────────────────────────────
@@ -268,7 +272,9 @@ class ARGUSAgent:
     def __init__(self):
         self.client   = _get_client()
         self.executor = ToolExecutor()
-        self.model    = cfg["stage4"]["model"]
+        # Use config model but fall back to known-good model if config still has old value
+        _cfg_model = cfg["stage4"].get("model", _DEFAULT_MODEL)
+        self.model = _DEFAULT_MODEL if "3.1" in _cfg_model else _cfg_model
 
     def process_detection(
         self,
@@ -311,7 +317,7 @@ class ARGUSAgent:
                 tool_choice="auto",
             )
 
-            msg       = response.choices[0].message
+            msg        = response.choices[0].message
             tool_calls = msg.tool_calls or []
 
             messages.append({"role": "assistant", "content": msg.content or "", "tool_calls": [
@@ -331,12 +337,11 @@ class ARGUSAgent:
                 fn = getattr(ToolExecutor, name, None)
                 result_data = fn(**inputs) if fn else {"error": f"Unknown tool {name}"}
 
-                # Store result
-                if name == "lookup_operator":       results["operator_record"] = result_data
-                elif name == "calculate_penalty":    results["penalty"]         = result_data
-                elif name == "query_historical_violations": results["history"]  = result_data
-                elif name == "draft_notice":         results["notice"]          = result_data
-                elif name == "assess_climate_risk":  results["climate_risk"]    = result_data
+                if name == "lookup_operator":              results["operator_record"] = result_data
+                elif name == "calculate_penalty":          results["penalty"]         = result_data
+                elif name == "query_historical_violations": results["history"]        = result_data
+                elif name == "draft_notice":               results["notice"]          = result_data
+                elif name == "assess_climate_risk":        results["climate_risk"]    = result_data
 
                 messages.append({
                     "role":         "tool",
@@ -380,7 +385,7 @@ class BatchEnforcementProcessor:
         attributions: list[AttributionResult],
         flux_outputs: list,
     ) -> list[dict]:
-        results  = []
+        results   = []
         threshold = cfg["pipeline"]["flux_threshold_kg_hr"]
 
         for det, attr, flux in zip(detections, attributions, flux_outputs):
@@ -391,7 +396,7 @@ class BatchEnforcementProcessor:
                     detection=det, attribution=attr,
                     flux_kg_hr=flux.flux_kg_hr, co2e_kg_hr=flux.co2e_kg_hr,
                 )
-                result["detection_id"] = det["label_id"]
+                result["detection_id"] = det.get("label_id", det.get("detection_id", 0))
                 result["facility_id"]  = attr.facility_id
                 result["flux_kg_hr"]   = flux.flux_kg_hr
                 results.append(result)

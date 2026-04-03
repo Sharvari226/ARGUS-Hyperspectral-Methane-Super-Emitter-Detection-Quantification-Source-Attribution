@@ -1,12 +1,5 @@
 """
 src/pipeline/orchestrator.py  — GEE + Modulus edition
-───────────────────────────────────────────────────────
-Updated to use:
-  - GEETROPOMIIngester  (replaces TROPOMIIngester)
-  - GEEWindIngester     (replaces ECMWFIngester)
-  - GEEEMITIngester     (replaces EMITIngester)
-  - TROPOMITensorPipeline (TorchGeo — replaces preprocess_tropomi)
-  - ModulusConcentrationNet PINN (replaces DeepXDE)
 """
 from __future__ import annotations
 
@@ -20,21 +13,15 @@ from loguru import logger
 
 from src.utils.config import cfg
 
-# ── Updated data ingesters (GEE) ─────────────────────────────────
 from src.data.gee import (
     GEETROPOMIIngester,
     GEEWindIngester,
     GEEEMITIngester,
     gee_status,
 )
-
-# ── TorchGeo pipeline ─────────────────────────────────────────────
 from src.data.torchgeo_pipeline import preprocess_tropomi
-
-# ── Facility DB ───────────────────────────────────────────────────
 from src.data.facility_db import load_facilities
 
-# ── Stage models ──────────────────────────────────────────────────
 from src.models.stage1_sat import (
     load_model as load_stage1,
     mc_predict,
@@ -121,7 +108,7 @@ class PipelineResult:
                         "confidence":    round(d.get("attribution_confidence", 0), 4),
                         "distance_km":   round(d.get("distance_km", 0), 2),
                     },
-                    "economics": d.get("economics", {}),
+                    "economics":   d.get("economics", {}),
                     "enforcement": {
                         "notice_id":  d.get("notice_id", ""),
                         "risk_level": d.get("risk_level", ""),
@@ -141,33 +128,21 @@ class PipelineResult:
 # ═════════════════════════════════════════════════════════════════
 
 class ARGUSPipeline:
-    """
-    Master pipeline — chains all 4 stages end-to-end.
-
-    Data sources:   Google Earth Engine (TROPOMI + ERA5 + EMIT)
-    Stage 1:        ViT segmentation + MC Dropout (TorchGeo preprocessing)
-    Stage 2:        NVIDIA Modulus PINN flux estimation
-    Stage 3:        Temporal GAN source attribution (PyG)
-    Stage 4:        Groq LLM regulatory enforcement agent
-    """
 
     def __init__(self, device: str = "cpu"):
         self.device = device
         logger.info("ARGUSPipeline: initialising...")
 
-        # GEE data ingesters
         self.tropomi = GEETROPOMIIngester()
         self.wind    = GEEWindIngester()
         self.emit    = GEEEMITIngester()
 
-        # Stage models
         self.stage1  = load_stage1(device=device)
         self.stage2  = PINNFluxEstimator(device=device)
         self.stage3  = SourceAttributor(device=device)
         self.stage4  = BatchEnforcementProcessor()
         self.al      = ActiveLearningQueue()
 
-        # GEE status for API reporting
         self.gee_info = gee_status()
         logger.info(
             f"ARGUSPipeline: ready | "
@@ -176,15 +151,17 @@ class ARGUSPipeline:
 
     def run(
         self,
-        lat_min: float, lat_max: float,
-        lon_min: float, lon_max: float,
-        date:    datetime | None = None,
-        history: list[dict] | None = None,
+        lat_min:  float,
+        lat_max:  float,
+        lon_min:  float,
+        lon_max:  float,
+        date:     datetime | None = None,
+        history:  list[dict] | None = None,
     ) -> PipelineResult:
 
-        run_id  = f"RUN-{uuid.uuid4().hex[:8].upper()}"
-        t_start = datetime.utcnow()
-        timing  = {}
+        run_id   = f"RUN-{uuid.uuid4().hex[:8].upper()}"
+        t_start  = datetime.utcnow()
+        timing   = {}
         warnings = []
 
         bbox = {
@@ -226,7 +203,6 @@ class ARGUSPipeline:
             cloud_frac = float(ds_tropomi["cloud_fraction"].values.mean())
             if cloud_frac > cfg["pipeline"]["cloud_mask_threshold"]:
                 logger.info(f"Cloud cover {cloud_frac:.1%} — running inpainting")
-                import xarray as xr
                 inpainted = apply_inpainting(ds_tropomi, u_ms, v_ms)
                 ds_tropomi["methane_mixing_ratio_bias_corrected"].values[...] = inpainted
                 result.cloud_inpainted = True
@@ -238,8 +214,8 @@ class ARGUSPipeline:
         t0 = datetime.utcnow()
         detections = []
         try:
-            tensor  = preprocess_tropomi(ds_tropomi).to(self.device)
-            seg_out = mc_predict(self.stage1, tensor, device=self.device)
+            tensor     = preprocess_tropomi(ds_tropomi).to(self.device)
+            seg_out    = mc_predict(self.stage1, tensor, device=self.device)
             detections = extract_plume_detections(
                 mask_mean=seg_out.mask_mean.squeeze(0),
                 mask_var =seg_out.mask_variance.squeeze(0),
@@ -263,9 +239,15 @@ class ARGUSPipeline:
             return result
 
         # ── Active learning triage ────────────────────────────────
-        confident, uncertain = self.al.evaluate_and_queue(detections, run_id=run_id)
-        result.review_queue  = uncertain
-        process_dets         = confident if confident else detections
+        # evaluate_and_queue returns an int (count queued), not a tuple
+        # We keep all detections for processing and let the queue run in background
+        queued_count = self.al.evaluate_and_queue(detections, run_id=run_id)
+        process_dets = detections   # process all detections
+        uncertain    = []           # uncertain ones are already saved to MongoDB by evaluate_and_queue
+        result.review_queue = []
+
+        if queued_count > 0:
+            logger.info(f"Active learning: {queued_count} detections queued for review")
 
         # ── Stage 2: Modulus PINN flux ────────────────────────────
         t0 = datetime.utcnow()
@@ -293,10 +275,12 @@ class ARGUSPipeline:
                 flux_outputs.append(flux)
             except Exception as e:
                 warnings.append(f"Stage 2 det-{det['label_id']}: {e}")
-                fallback = float(det["pixel_area"] * 2.5)
+                fallback  = float(det.get("pixel_area", 1.0) * 2.5)
                 mock_flux = FluxOutput(
-                    flux_kg_hr=fallback, flux_uncertainty=fallback*0.3,
-                    plume_length_km=1.0, effective_wind_ms=abs(u_ms),
+                    flux_kg_hr=fallback,
+                    flux_uncertainty=fallback * 0.3,
+                    plume_length_km=1.0,
+                    effective_wind_ms=abs(u_ms),
                     transport_age_hr=1.0,
                     co2e_kg_hr=fallback * cfg["intelligence"]["methane_gwp_20yr"],
                 )
@@ -327,21 +311,22 @@ class ARGUSPipeline:
                 detections=process_dets, u_ms=u_ms, v_ms=v_ms, history=history,
             )
             for det, attr in zip(process_dets, attributions):
-                det["facility_id"]           = attr.facility_id
-                det["facility_name"]         = attr.facility_name
-                det["operator"]              = attr.operator
+                det["facility_id"]            = attr.facility_id
+                det["facility_name"]          = attr.facility_name
+                det["operator"]               = attr.operator
                 det["attribution_confidence"] = attr.confidence
-                det["distance_km"]           = attr.distance_km
+                det["distance_km"]            = attr.distance_km
         except Exception as e:
             warnings.append(f"Stage 3: {e}")
+            logger.error(f"Stage 3 error: {e}")
             all_fac = load_facilities()
             for det in process_dets:
                 row = all_fac.iloc[0]
                 attributions.append(AttributionResult(
                     facility_id=str(row["facility_id"]),
-                    facility_name=str(row.get("facility_name","?")),
-                    operator=str(row.get("operator","?")),
-                    facility_type=str(row.get("type","unknown")),
+                    facility_name=str(row.get("facility_name", "?")),
+                    operator=str(row.get("operator", "?")),
+                    facility_type=str(row.get("type", "unknown")),
                     confidence=0.5, distance_km=0.0,
                     back_traj_lat=det["centroid_lat"],
                     back_traj_lon=det["centroid_lon"],
@@ -362,6 +347,7 @@ class ARGUSPipeline:
                         break
         except Exception as e:
             warnings.append(f"Scorecard: {e}")
+            logger.error(f"Scorecard error: {e}")
 
         # ── Stage 4: Groq LLM enforcement ─────────────────────────
         t0 = datetime.utcnow()
@@ -370,7 +356,10 @@ class ARGUSPipeline:
             threshold    = cfg["pipeline"]["flux_threshold_kg_hr"]
             super_dets   = [d for d, f in zip(process_dets, flux_outputs) if f.flux_kg_hr >= threshold]
             super_fluxes = [f for f in flux_outputs if f.flux_kg_hr >= threshold]
-            super_attrs  = [a for d, a, f in zip(process_dets, attributions, flux_outputs) if f.flux_kg_hr >= threshold]
+            super_attrs  = [
+                a for d, a, f in zip(process_dets, attributions, flux_outputs)
+                if f.flux_kg_hr >= threshold
+            ]
 
             if super_dets:
                 enforcement_results = self.stage4.process_all(
@@ -387,11 +376,12 @@ class ARGUSPipeline:
                             det["fine_inr"]  = notice.get("fine_inr", 0.0)
         except Exception as e:
             warnings.append(f"Stage 4: {e}")
+            logger.error(f"Stage 4 error: {e}")
 
         timing["stage4_groq"] = (datetime.utcnow() - t0).total_seconds()
 
-        # ── Aggregate ─────────────────────────────────────────────
-        result.detections   = process_dets + uncertain
+        # ── Aggregate results ─────────────────────────────────────
+        result.detections   = process_dets
         result.flux_outputs = flux_outputs
         result.attributions = attributions
         result.enforcement  = enforcement_results
@@ -399,7 +389,8 @@ class ARGUSPipeline:
         result.timing       = timing
 
         result.n_super_emitters = sum(
-            1 for f in flux_outputs if f.flux_kg_hr >= cfg["pipeline"]["flux_threshold_kg_hr"]
+            1 for f in flux_outputs
+            if f.flux_kg_hr >= cfg["pipeline"]["flux_threshold_kg_hr"]
         )
         result.total_flux_kg_hr = float(sum(f.flux_kg_hr for f in flux_outputs))
         result.total_co2e_kg_hr = float(sum(f.co2e_kg_hr for f in flux_outputs))
@@ -414,8 +405,7 @@ class ARGUSPipeline:
             f"{result.n_super_emitters} super-emitters | "
             f"{result.total_flux_kg_hr:.1f} kg/hr | "
             f"${result.total_impact_usd:,.0f} | "
-            f"{result.duration_seconds:.1f}s | "
-            f"GEE={'live' if result.gee_live else 'mock'}"
+            f"{result.duration_seconds:.1f}s"
         )
         return result
 
@@ -430,28 +420,40 @@ class RunStore:
         self.db = get_sync_db()
 
     def save(self, result: PipelineResult) -> None:
-        doc = result.to_api_dict()
+        doc      = result.to_api_dict()
         doc["_id"] = result.run_id
         self.db.runs.replace_one({"_id": result.run_id}, doc, upsert=True)
 
         for det in result.detections:
-            det_doc = {**det, "run_id": result.run_id, "timestamp": result.timestamp, "bbox": result.bbox}
-            lat, lon = det.get("centroid_lat"), det.get("centroid_lon")
+            det_doc = {
+                **det,
+                "run_id":    result.run_id,
+                "timestamp": result.timestamp,
+                "bbox":      result.bbox,
+            }
+            lat = det.get("centroid_lat")
+            lon = det.get("centroid_lon")
             if lat and lon:
                 det_doc["location"] = {"type": "Point", "coordinates": [lon, lat]}
             self.db.detections.replace_one(
                 {"run_id": result.run_id, "detection_id": det.get("detection_id")},
                 det_doc, upsert=True,
             )
+
         for row in result.scorecard:
             self.db.scorecard.replace_one(
                 {"facility_id": row["facility_id"]},
-                {**row, "updated_at": result.timestamp}, upsert=True,
+                {**row, "updated_at": result.timestamp},
+                upsert=True,
             )
         logger.debug(f"RunStore: saved {result.run_id}")
 
     def load_recent(self, n: int = 20) -> list[dict]:
-        return list(self.db.runs.find({}, {"_id": 0}).sort("timestamp", -1).limit(n))
+        return list(
+            self.db.runs.find({}, {"_id": 0}).sort("timestamp", -1).limit(n)
+        )
 
     def load_all_detections(self, limit: int = 1000) -> list[dict]:
-        return list(self.db.detections.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit))
+        return list(
+            self.db.detections.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit)
+        )

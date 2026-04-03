@@ -1,20 +1,17 @@
+# configs/config.yaml — ARGUS production config
+
 pipeline:
-  # Detection thresholds
-  flux_threshold_kg_hr: 100.0        # super-emitter cutoff
-  confidence_threshold: 0.85         # min detection confidence
-  mc_dropout_passes: 30              # Monte Carlo inference passes
-  uncertainty_max: 0.15              # flag for active learning above this
-
-  # Attribution
-  attribution_radius_km: 50.0        # max plume–facility distance
-  temporal_window_days: 30           # days of history for TGAN
-
-  # Cloud inpainting
-  cloud_mask_threshold: 0.3          # fraction occluded → trigger inpainting
+  flux_threshold_kg_hr: 100.0
+  confidence_threshold: 0.85
+  mc_dropout_passes: 30
+  uncertainty_max: 0.15
+  attribution_radius_km: 50.0
+  temporal_window_days: 30
+  cloud_mask_threshold: 0.3
 
 stage1:
   model: vit_small_patch16_224
-  bands: [6, 7, 8, 9]               # TROPOMI CH4-sensitive bands
+  bands: [0, 1, 2, 3]
   patch_size: 16
   image_size: 224
   dropout_rate: 0.1
@@ -22,27 +19,28 @@ stage1:
 
 stage2:
   pinn_layers: [256, 256, 256, 128]
-  wind_channels: 2                   # u, v components
-  physics_weight: 0.3                # loss = data_loss + 0.3 * physics_loss
+  wind_channels: 2
+  physics_weight: 0.3
   checkpoint: models/checkpoints/pinn.pt
 
 stage3:
   gat_heads: 4
   gat_hidden: 128
   gat_layers: 3
-  edge_time_decay: 0.85             # weight older edges less
+  edge_time_decay: 0.85
   checkpoint: models/checkpoints/tgan.pt
 
 stage4:
-  model: llama-3.1-70b-versatile    # Groq model name
+  model: llama-3.1-70b-versatile
   max_tokens: 2048
-  temperature: 0.1 # low temp for regulatory drafts
+  temperature: 0.1
 
 intelligence:
-  # Economic conversion
-  methane_gwp_20yr: 80              # CH4 global warming potential
-  co2_mmbtu_per_kg_ch4: 0.0553     # energy content
-  regulatory_fine_per_ton_co2e: 50  # USD, India NDC baseline
+  methane_gwp_20yr: 80
+  co2_mmbtu_per_kg_ch4: 0.0553
+  gas_price_usd_per_mmbtu: 2.80
+  carbon_price_usd_per_ton: 15.0
+  regulatory_fine_per_ton_co2e: 50
 
 data:
   tropomi_dir: data/raw/tropomi
@@ -54,7 +52,7 @@ data:
 api:
   host: 0.0.0.0
   port: 8000
-  workers: 4
+  workers: 1
   rate_limit_per_minute: 60
 
 dashboard:

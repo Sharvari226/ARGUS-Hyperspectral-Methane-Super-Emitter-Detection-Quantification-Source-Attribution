@@ -10,14 +10,13 @@ from src.pipeline.orchestrator import ARGUSPipeline, RunStore
 from src.utils.config import cfg
 
 
-# Default monitoring grid — key super-emitter regions globally
 MONITORING_BBOXES = [
-    {"name": "Permian Basin, USA",       "lat_min": 31.0, "lat_max": 33.0, "lon_min": -104.0, "lon_max": -101.0},
-    {"name": "Turkmenistan Gas Fields",  "lat_min": 37.0, "lat_max": 40.0, "lon_min":   55.0, "lon_max":   60.0},
-    {"name": "Niger Delta, Nigeria",     "lat_min":  4.0, "lat_max":  6.0, "lon_min":    5.0, "lon_max":    8.0},
-    {"name": "Siberia Gas Fields",       "lat_min": 60.0, "lat_max": 65.0, "lon_min":   70.0, "lon_max":   80.0},
-    {"name": "Mumbai Offshore, India",   "lat_min": 18.0, "lat_max": 22.0, "lon_min":   68.0, "lon_max":   73.0},
-    {"name": "Saudi Aramco East",        "lat_min": 26.0, "lat_max": 28.0, "lon_min":   49.0, "lon_max":   51.0},
+    {"name": "Permian Basin, USA",      "lat_min": 31.0, "lat_max": 33.0, "lon_min": -104.0, "lon_max": -101.0},
+    {"name": "Turkmenistan Gas Fields", "lat_min": 37.0, "lat_max": 40.0, "lon_min":   55.0, "lon_max":   60.0},
+    {"name": "Niger Delta, Nigeria",    "lat_min":  4.0, "lat_max":  6.0, "lon_min":    5.0, "lon_max":    8.0},
+    {"name": "Siberia Gas Fields",      "lat_min": 60.0, "lat_max": 65.0, "lon_min":   70.0, "lon_max":   80.0},
+    {"name": "Mumbai Offshore, India",  "lat_min": 18.0, "lat_max": 22.0, "lon_min":   68.0, "lon_max":   73.0},
+    {"name": "Saudi Aramco East",       "lat_min": 26.0, "lat_max": 28.0, "lon_min":   49.0, "lon_max":   51.0},
 ]
 
 
@@ -29,7 +28,7 @@ class PipelineScheduler:
 
     def __init__(
         self,
-        interval_seconds: int = 300,   # 5 minutes for demo
+        interval_seconds: int = 300,
         bboxes: list[dict] | None = None,
     ):
         self.interval  = interval_seconds

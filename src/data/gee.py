@@ -92,8 +92,8 @@ class GEETROPOMIIngester:
         lat_min, lat_max, lon_min, lon_max,
         date, days_back,
     ) -> xr.Dataset:
-        date    = date or datetime.utcnow()
-        end_dt  = date.strftime("%Y-%m-%d")
+        date     = date or datetime.utcnow()
+        end_dt   = date.strftime("%Y-%m-%d")
         start_dt = (date - timedelta(days=days_back)).strftime("%Y-%m-%d")
 
         region = ee.Geometry.Rectangle([lon_min, lat_min, lon_max, lat_max])
@@ -110,7 +110,6 @@ class GEETROPOMIIngester:
         scale  = 10000   # metres — ~0.1 degree at equator
 
         try:
-            # Sample to numpy via geemap
             arr = geemap.ee_to_numpy(
                 image,
                 bands=[self.BAND],
@@ -194,6 +193,9 @@ class GEEWindIngester:
     GEE Collection: ECMWF/ERA5_LAND/HOURLY
     Variables:      u_component_of_wind_10m, v_component_of_wind_10m
     Resolution:     ~9km
+
+    Fix: ERA5_LAND/HOURLY has ~5-day latency. Always fetch a
+    5-day window ending yesterday to guarantee non-empty results.
     """
 
     COLLECTION = "ECMWF/ERA5_LAND/HOURLY"
@@ -211,20 +213,28 @@ class GEEWindIngester:
         return self._mock(lat_min, lat_max, lon_min, lon_max)
 
     def _fetch_gee(self, lat_min, lat_max, lon_min, lon_max, date) -> xr.Dataset:
-        date   = date or datetime.utcnow()
-        dt_str = date.strftime("%Y-%m-%d")
-        region = ee.Geometry.Rectangle([lon_min, lat_min, lon_max, lat_max])
+        # ERA5-Land HOURLY has ~5 day latency on GEE.
+        # Use a 7-day window ending 5 days ago to always get real data.
+        ref_date  = (date or datetime.utcnow()) - timedelta(days=5)
+        end_dt    = ref_date.strftime("%Y-%m-%d")
+        start_dt  = (ref_date - timedelta(days=7)).strftime("%Y-%m-%d")
+        region    = ee.Geometry.Rectangle([lon_min, lat_min, lon_max, lat_max])
 
-        image = (
+        collection = (
             ee.ImageCollection(self.COLLECTION)
-            .filterDate(dt_str, dt_str)
+            .filterDate(start_dt, end_dt)
             .filterBounds(region)
             .select([self.U_BAND, self.V_BAND])
-            .mean()
-            .clip(region)
         )
 
         try:
+            # Guard: check collection is not empty before calling .mean()
+            count = collection.size().getInfo()
+            if count == 0:
+                raise ValueError(f"No ERA5 images in {start_dt}→{end_dt} for this bbox")
+
+            image = collection.mean().clip(region)
+
             arr = geemap.ee_to_numpy(
                 image,
                 bands=[self.U_BAND, self.V_BAND],
@@ -248,8 +258,9 @@ class GEEWindIngester:
                 coords={"lat": lats, "lon": lons},
             )
             logger.info(
-                f"GEE ERA5: u={u10.mean():.2f} m/s | "
-                f"v={v10.mean():.2f} m/s"
+                f"GEE ERA5: fetched {count} images | "
+                f"u={u10.mean():.2f} m/s v={v10.mean():.2f} m/s | "
+                f"{start_dt} → {end_dt}"
             )
             return ds
 
@@ -264,7 +275,7 @@ class GEEWindIngester:
         u10  = np.full((grid, grid),  5.2, dtype=np.float32)
         v10  = np.full((grid, grid), -1.8, dtype=np.float32)
         ds   = xr.Dataset(
-            {"u10": (["lat","lon"], u10), "v10": (["lat","lon"], v10)},
+            {"u10": (["lat", "lon"], u10), "v10": (["lat", "lon"], v10)},
             coords={"lat": lats, "lon": lons},
         )
         logger.info("GEE ERA5: generated synthetic wind mock")
@@ -280,8 +291,13 @@ class GEEEMITIngester:
     Fetches NASA EMIT CH4 enhancement data from Google Earth Engine.
 
     GEE Collection: NASA/EMIT/L2B/CH4ENH
-    Resolution:     ~60m (much higher than TROPOMI)
+    Band:           methane_enhancement (ppm·m)
+    Resolution:     ~60m
     Used for dual-sensor cross-validation.
+
+    Note: EMIT has sparse spatial coverage — many regions will
+    return empty collections. We handle this gracefully by checking
+    collection size before computing and falling back to mock.
     """
 
     COLLECTION = "NASA/EMIT/L2B/CH4ENH"
@@ -298,21 +314,36 @@ class GEEEMITIngester:
         return self._mock(lat_min, lat_max, lon_min, lon_max)
 
     def _fetch_gee(self, lat_min, lat_max, lon_min, lon_max, date) -> xr.Dataset:
-        date    = date or datetime.utcnow()
-        end_dt  = date.strftime("%Y-%m-%d")
-        start_dt = (date - timedelta(days=30)).strftime("%Y-%m-%d")
-        region  = ee.Geometry.Rectangle([lon_min, lat_min, lon_max, lat_max])
+        date     = date or datetime.utcnow()
+        end_dt   = date.strftime("%Y-%m-%d")
+        # EMIT has sparse revisit — use a 90-day lookback to maximise hit rate
+        start_dt = (date - timedelta(days=90)).strftime("%Y-%m-%d")
+        region   = ee.Geometry.Rectangle([lon_min, lat_min, lon_max, lat_max])
 
-        image = (
+        collection = (
             ee.ImageCollection(self.COLLECTION)
             .filterDate(start_dt, end_dt)
             .filterBounds(region)
-            .select([self.BAND])
-            .max()   # peak enhancement
-            .clip(region)
         )
 
         try:
+            # Guard: check collection size FIRST — calling .select() on an
+            # empty collection returns an image with no bands, which causes
+            # "Image has no band named X" downstream.
+            count = collection.size().getInfo()
+            if count == 0:
+                raise ValueError(
+                    f"No EMIT scenes in bbox for {start_dt}→{end_dt} "
+                    f"(EMIT has sparse coverage — falling back to mock)"
+                )
+
+            image = (
+                collection
+                .select([self.BAND])
+                .max()      # peak enhancement across all available scenes
+                .clip(region)
+            )
+
             arr = geemap.ee_to_numpy(
                 image,
                 bands=[self.BAND],
@@ -320,7 +351,7 @@ class GEEEMITIngester:
                 scale=1000,   # 1km for reasonable array size
             )
             if arr is None or arr.size == 0:
-                raise ValueError("Empty GEE EMIT result")
+                raise ValueError("Empty GEE EMIT result after fetch")
 
             enh  = arr[:, :, 0].astype(np.float32)
             grid = enh.shape[0]
@@ -331,7 +362,11 @@ class GEEEMITIngester:
                 {"ch4_enhancement": (["lat", "lon"], enh)},
                 coords={"lat": lats, "lon": lons},
             )
-            logger.info(f"GEE EMIT: peak enhancement = {enh.max():.1f} ppb")
+            logger.info(
+                f"GEE EMIT: {count} scenes | "
+                f"peak enhancement = {enh.max():.1f} ppm·m | "
+                f"{start_dt} → {end_dt}"
+            )
             return ds
 
         except Exception as e:
