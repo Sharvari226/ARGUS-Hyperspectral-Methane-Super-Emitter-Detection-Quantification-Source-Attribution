@@ -1,0 +1,20 @@
+Subject: NOTICE OF VIOLATION — {{ facility_name }} ({{ facility_id }}) — {{ notice_id }}
+
+Dear {{ operator }},
+
+The ARGUS Autonomous Regulatory Intelligence System has detected a methane
+super-emitter event at your facility and issued Notice of Violation {{ notice_id }}.
+
+KEY FACTS:
+  • Emission Rate:    {{ flux_kg_hr|round(1) }} kg CH₄/hour
+  • Total Liability:  USD {{ total_fine_usd|int|format_number }} (₹{{ total_fine_inr|int|format_number }})
+  • Response Deadline: {{ deadline }}
+
+The full Notice of Violation is attached. Immediate corrective action is required.
+
+Non-compliance will result in escalation to the National Green Tribunal (NGT)
+and publication in the ARGUS public violation registry.
+
+ARGUS Enforcement System
+Central Pollution Control Board
+https://argus.cpcb.nic.in

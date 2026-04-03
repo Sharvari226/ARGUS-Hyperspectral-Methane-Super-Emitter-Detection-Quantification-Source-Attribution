@@ -1,0 +1,74 @@
+version: "3.9"
+
+services:
+
+  api:
+    build: .
+    container_name: argus-api
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./logs:/app/logs
+      - gee_auth:/root/.config/earthengine
+    restart: unless-stopped
+    command: >
+      uvicorn src.api.main:app
+      --host 0.0.0.0
+      --port 8000
+      --workers 1
+      --log-level info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  dashboard:
+    build: .
+    container_name: argus-dashboard
+    ports:
+      - "8501:8501"
+    env_file: .env
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    command: >
+      python -m streamlit run dashboard/app.py
+      --server.port 8501
+      --server.address 0.0.0.0
+      --server.headless true
+      --server.enableCORS false
+      --server.enableXsrfProtection false
+
+  mongodb:
+    image: mongo:7-jammy
+    container_name: argus-mongo
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: argus
+      MONGO_INITDB_ROOT_PASSWORD: argus_secret
+      MONGO_INITDB_DATABASE: argus
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongo_data:
+  gee_auth:
