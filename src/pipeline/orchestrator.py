@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 from loguru import logger
+from torch.linalg import det
 
 from src.utils.config import cfg
 
@@ -427,17 +428,23 @@ class RunStore:
         for det in result.detections:
             det_doc = {
                 **det,
-                "run_id":    result.run_id,
-                "timestamp": result.timestamp,
-                "bbox":      result.bbox,
+                "run_id":       result.run_id,
+                "timestamp":    result.timestamp,
+                "bbox":         result.bbox,
+                "detection_id": det.get("label_id"),  # normalize here
             }
+
             lat = det.get("centroid_lat")
             lon = det.get("centroid_lon")
             if lat and lon:
                 det_doc["location"] = {"type": "Point", "coordinates": [lon, lat]}
+           
+
+            det_id = det.get("detection_id") or det.get("label_id") or det.get("id")
             self.db.detections.replace_one(
-                {"run_id": result.run_id, "detection_id": det.get("detection_id")},
-                det_doc, upsert=True,
+                {"run_id": result.run_id, "detection_id": det_id},
+                {**det_doc, "detection_id": det_id},
+                upsert=True,
             )
 
         for row in result.scorecard:
