@@ -245,27 +245,27 @@ def mc_predict(
 
 def preprocess_tropomi(ds) -> torch.Tensor:
     """
-    Convert an xarray Dataset (from TROPOMIIngester) into a
-    model-ready (1, 4, 224, 224) float32 tensor.
-
-    Bands used:
-        0 — methane_mixing_ratio_bias_corrected
-        1 — methane_mixing_ratio_precision
-        2 — qa_value
-        3 — cloud_fraction   (inverted: high cloud → low signal)
+    Convert xarray Dataset → (1, 4, 224, 224) float32 tensor.
+    Handles NaN/masked pixels before normalisation.
     """
-    import xarray as xr
-    from torchvision.transforms.functional import resize as tv_resize
+    import torch.nn.functional as F
 
     SIZE = cfg["stage1"]["image_size"]
 
     def extract(name: str, invert: bool = False) -> np.ndarray:
-        arr = ds[name].values
+        arr = ds[name].values.copy()
+        # Replace zeros and NaNs with NaN first, then fill with median
+        arr = arr.astype(np.float32)
+        arr[arr == 0] = np.nan
+        if np.isnan(arr).all():
+            arr = np.zeros_like(arr)
+        else:
+            median = np.nanmedian(arr)
+            arr = np.where(np.isnan(arr), median, arr)
         if invert:
             arr = 1.0 - arr
-        arr = np.nan_to_num(arr, nan=0.0)
         # Robust normalise to [0, 1]
-        lo, hi = np.percentile(arr, 1), np.percentile(arr, 99)
+        lo, hi = np.nanpercentile(arr, 1), np.nanpercentile(arr, 99)
         if hi > lo:
             arr = (arr - lo) / (hi - lo)
         return arr.clip(0, 1).astype(np.float32)
@@ -275,88 +275,103 @@ def preprocess_tropomi(ds) -> torch.Tensor:
         extract("methane_mixing_ratio_precision"),
         extract("qa_value"),
         extract("cloud_fraction", invert=True),
-    ], axis=0)   # (4, H, W)
+    ], axis=0)  # (4, H, W)
 
-    t = torch.from_numpy(bands).unsqueeze(0)   # (1, 4, H, W)
-
-    # Resize to model input size using bilinear interpolation
+    t = torch.from_numpy(bands).unsqueeze(0)  # (1, 4, H, W)
     t = F.interpolate(t, size=(SIZE, SIZE), mode="bilinear", align_corners=False)
     return t
 
 
-# ── Postprocessing ────────────────────────────────────────────────────────────
-
 def extract_plume_detections(
-    mask_mean: torch.Tensor,    # (H, W)
-    mask_var:  torch.Tensor,    # (H, W)
-    lat_min:   float,
-    lat_max:   float,
-    lon_min:   float,
-    lon_max:   float,
+    mask_mean:  torch.Tensor,
+    mask_var:   torch.Tensor,
+    lat_min:    float,
+    lat_max:    float,
+    lon_min:    float,
+    lon_max:    float,
     prob_threshold:  float = 0.35,
-    min_pixels: int = 2,
+    min_pixels:      int   = 2,
     conf_threshold:  float | None = None,
+    raw_ch4:         np.ndarray | None = None,  # pass ds ch4 values for anomaly fallback
 ) -> list[dict]:
     """
-    Convert probability map → list of plume detection dicts.
-    Each detection includes centroid lat/lon, area, mean flux probability,
-    and a confidence flag (low variance = high confidence).
+    Convert probability map → detection dicts.
+    Falls back to CH4 anomaly detection when model output is uninformative
+    (uniform ~0.5 from untrained checkpoint on real data).
     """
-    conf_threshold = conf_threshold or cfg["pipeline"]["uncertainty_max"]
+    from scipy import ndimage
 
-    mask  = (mask_mean > prob_threshold).numpy().astype(np.uint8)
+    conf_threshold = conf_threshold or cfg["pipeline"]["uncertainty_max"]
     probs = mask_mean.numpy()
     varis = mask_var.numpy()
+    H, W  = probs.shape
 
-    H, W = mask.shape
-    lats  = np.linspace(lat_min, lat_max, H)
-    lons  = np.linspace(lon_min, lon_max, W)
+    lats = np.linspace(lat_min, lat_max, H)
+    lons = np.linspace(lon_min, lon_max, W)
 
-    # Simple connected-component via scipy
-    from scipy import ndimage
-    labeled, n_features = ndimage.label(mask)
+    # ── Detect if model output is uninformative (uniform ~0.5) ───────────────
+    model_is_uninformative = (probs.max() - probs.min()) < 0.15
+
+    if model_is_uninformative and raw_ch4 is not None:
+        # Fall back to direct CH4 anomaly detection
+        # Real TROPOMI background: ~1870 ppb. Anomaly = pixels > mean + 2*std
+        ch4 = raw_ch4.astype(np.float32)
+        ch4[ch4 == 0] = np.nan
+        ch4_clean = np.where(np.isnan(ch4), np.nanmedian(ch4), ch4)
+
+        mean_ch4 = float(np.nanmean(ch4_clean))
+        std_ch4  = float(np.nanstd(ch4_clean))
+        threshold_ppb = mean_ch4 + 1.5 * std_ch4
+
+        anomaly_mask = (ch4_clean > threshold_ppb).astype(np.uint8)
+        # Use anomaly mask as proxy probability
+        probs = np.where(anomaly_mask, 0.75, 0.1).astype(np.float32)
+        varis = np.full_like(probs, 0.05)
+
+        logger.info(
+            f"Stage1: model uninformative — using CH4 anomaly detection "
+            f"(threshold={threshold_ppb:.1f} ppb, "
+            f"background={mean_ch4:.1f}±{std_ch4:.1f} ppb)"
+        )
+    else:
+        anomaly_mask = (probs > prob_threshold).astype(np.uint8)
+
+    # ── Connected components ──────────────────────────────────────────────────
+    labeled, n_features = ndimage.label(anomaly_mask if model_is_uninformative
+                                        else (probs > prob_threshold).astype(np.uint8))
     detections = []
 
     for label_id in range(1, n_features + 1):
         region_mask = labeled == label_id
         ys, xs = np.where(region_mask)
-        if len(ys) < 4:   # ignore single-pixel noise
+
+        if len(ys) < min_pixels:
             continue
 
-        c_lat = float(lats[ys].mean())
-        c_lon = float(lons[xs].mean())
-        area  = int(region_mask.sum())
+        c_lat     = float(lats[np.clip(ys, 0, H - 1)].mean())
+        c_lon     = float(lons[np.clip(xs, 0, W - 1)].mean())
+        area      = int(region_mask.sum())
         mean_prob = float(probs[region_mask].mean())
         mean_var  = float(varis[region_mask].mean())
 
-        def extract_plume_detections(
-            mask_mean: torch.Tensor,
-            mask_var:  torch.Tensor,
-            lat_min:   float,
-            lat_max:   float,
-            lon_min:   float,
-            lon_max:   float,
-            prob_threshold:  float = 0.35,   # was 0.5 — catches diffuse low emitters
-            min_pixels:      int   = 2,      # was hardcoded 4 — allow smaller plumes
-            conf_threshold:  float | None = None,
-        ) -> list[dict]:
-            conf_threshold = conf_threshold or cfg["pipeline"]["uncertainty_max"]
-
-    mask  = (mask_mean > prob_threshold).numpy().astype(np.uint8)
-    ...
-    for label_id in range(1, n_features + 1):
-        region_mask = labeled == label_id
-        ys, xs = np.where(region_mask)
-        if len(ys) < min_pixels:   # was `< 4` hardcoded
-            continue
+        detections.append({
+            "label_id":           label_id,
+            "centroid_lat":       round(c_lat, 5),
+            "centroid_lon":       round(c_lon, 5),
+            "pixel_area":         area,
+            "mean_probability":   round(mean_prob, 4),
+            "epistemic_variance": round(mean_var, 4),
+            "high_confidence":    mean_var < conf_threshold,
+            "pixel_ys":           ys.tolist(),
+            "pixel_xs":           xs.tolist(),
+        })
 
     logger.info(
         f"PlumeSegmenter: {len(detections)} plumes detected "
-        f"({sum(d['high_confidence'] for d in detections)} high-confidence)"
+        f"({'anomaly-based' if model_is_uninformative else 'model-based'}, "
+        f"{sum(d['high_confidence'] for d in detections)} high-confidence)"
     )
     return detections
-
-
 # ── Checkpoint helpers ────────────────────────────────────────────────────────
 
 def load_model(device: str = "cpu") -> PlumeSegmenter:

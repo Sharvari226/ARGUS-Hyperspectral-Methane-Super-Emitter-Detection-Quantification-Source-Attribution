@@ -145,13 +145,63 @@ Always complete all 5 steps.
 """.strip()
 
 
-# ── Geometry-safe JSON encoder ────────────────────────────────────
+# ── Geometry-safe helpers ─────────────────────────────────────────
+
+def _sanitise_geometry(obj: Any) -> Any:
+    """
+    Recursively walk a dict/list and convert any Shapely or GeoJSON geometry
+    object to a plain __geo_interface__ dict.  Also strips any object that
+    cannot be JSON-serialised (e.g. numpy scalars → float).
+    """
+    # Shapely geometries (Point, Polygon, MultiPolygon, …)
+    if hasattr(obj, "__geo_interface__"):
+        return obj.__geo_interface__
+
+    # shapely / geopandas geometry stored as a GeoSeries row
+    if hasattr(obj, "to_json"):
+        try:
+            return json.loads(obj.to_json())
+        except Exception:
+            return str(obj)
+
+    if isinstance(obj, dict):
+        return {k: _sanitise_geometry(v) for k, v in obj.items()}
+
+    if isinstance(obj, (list, tuple)):
+        return [_sanitise_geometry(v) for v in obj]
+
+    # numpy scalar → plain Python float/int
+    try:
+        import numpy as np
+        if isinstance(obj, (np.integer,)):
+            return int(obj)
+        if isinstance(obj, (np.floating,)):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+    except ImportError:
+        pass
+
+    return obj
+
 
 class _GeoEncoder(json.JSONEncoder):
-    """Converts Shapely / GeoJSON geometry objects to dicts before serialising."""
+    """Fallback encoder — converts anything _sanitise_geometry missed."""
     def default(self, obj):
         if hasattr(obj, "__geo_interface__"):
             return obj.__geo_interface__
+        if hasattr(obj, "to_json"):
+            try:
+                return json.loads(obj.to_json())
+            except Exception:
+                return str(obj)
+        try:
+            import numpy as np
+            if isinstance(obj, (np.integer,)):  return int(obj)
+            if isinstance(obj, (np.floating,)): return float(obj)
+            if isinstance(obj, np.ndarray):     return obj.tolist()
+        except ImportError:
+            pass
         return super().default(obj)
 
 
@@ -165,12 +215,9 @@ class ToolExecutor:
         if record is None:
             return {"error": f"Facility {facility_id} not found"}
 
-        # Convert any Shapely geometry fields to plain GeoJSON dicts
-        for key, val in list(record.items()):
-            if hasattr(val, "__geo_interface__"):
-                record[key] = val.__geo_interface__
+        # Deeply sanitise every field — converts Polygon, GeoSeries, numpy, etc.
+        record = _sanitise_geometry(record)
 
-        # Ensure regulatory_contact exists
         record.setdefault("regulatory_contact", {
             "authority": "CPCB",
             "email":     "enforcement@cpcb.nic.in",
@@ -281,10 +328,10 @@ Payment Deadline: {deadline}
             "P4 — LOW"
         )
         return {
-            "flux_kg_hr":       flux_kg_hr,
-            "co2e_tonnes":      round(co2e_t, 2),
-            "priority_level":   priority,
-            "facility_type":    facility_type,
+            "flux_kg_hr":        flux_kg_hr,
+            "co2e_tonnes":       round(co2e_t, 2),
+            "priority_level":    priority,
+            "facility_type":     facility_type,
             "global_cars_equiv": round(co2e_t / 4.6),
         }
 
@@ -297,7 +344,6 @@ class ARGUSAgent:
         self.client   = _get_client()
         self.executor = ToolExecutor()
         _cfg_model    = cfg["stage4"].get("model", _DEFAULT_MODEL)
-        # Guard against stale config pointing at decommissioned model
         self.model    = _DEFAULT_MODEL if "3.1" in _cfg_model else _cfg_model
 
     def process_detection(
@@ -372,13 +418,15 @@ class ARGUSAgent:
                 fn          = getattr(ToolExecutor, name, None)
                 result_data = fn(**inputs) if fn else {"error": f"Unknown tool {name}"}
 
+                # Sanitise before storing AND before sending to Groq
+                result_data = _sanitise_geometry(result_data)
+
                 if name == "lookup_operator":               results["operator_record"] = result_data
                 elif name == "calculate_penalty":           results["penalty"]         = result_data
                 elif name == "query_historical_violations": results["history"]         = result_data
                 elif name == "draft_notice":                results["notice"]          = result_data
                 elif name == "assess_climate_risk":         results["climate_risk"]    = result_data
 
-                # _GeoEncoder handles any residual Shapely geometry objects
                 messages.append({
                     "role":         "tool",
                     "tool_call_id": tc.id,

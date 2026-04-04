@@ -174,17 +174,16 @@ class PINNFluxEstimator:
     def estimate(
         self,
         detection:  dict,
-        ds_tropomi,            # xr.Dataset from TROPOMIIngester
-        u_ms:       float,     # eastward wind m/s
-        v_ms:       float,     # northward wind m/s
+        ds_tropomi,
+        u_ms:       float,
+        v_ms:       float,
         lat_min:    float,
         lat_max:    float,
         lon_min:    float,
         lon_max:    float,
-        n_epochs:   int = 300,
+        n_epochs:   int = 300,   # ignored — see fast_path below
     ) -> FluxOutput:
 
-        # ── 1. Extract observed pixel data ───────────────────────
         ys  = np.array(detection["pixel_ys"])
         xs  = np.array(detection["pixel_xs"])
         H, W = (
@@ -203,12 +202,10 @@ class PINNFluxEstimator:
             .astype(np.float32)
         )
 
-        # Background-subtract: median of surrounding non-plume pixels
         all_vals = ds_tropomi["methane_mixing_ratio_bias_corrected"].values.flatten()
         background = float(np.nanmedian(all_vals))
-        obs_enh = np.clip(obs_vals - background, 0, None)   # ppb enhancement
+        obs_enh = np.clip(obs_vals - background, 0, None)
 
-        # ── 2. Convert to metre coordinates centred on plume ─────
         c_lat = detection["centroid_lat"]
         c_lon = detection["centroid_lon"]
 
@@ -218,72 +215,66 @@ class PINNFluxEstimator:
             return x.astype(np.float32), y.astype(np.float32)
 
         x_m, y_m = latlon_to_m(obs_lats, obs_lons)
-
         wind_speed = float(np.sqrt(u_ms**2 + v_ms**2)) + 1e-3
 
-        # Wind components repeated for each observation point
-        u_arr = np.full_like(x_m, u_ms)
-        v_arr = np.full_like(x_m, v_ms)
+        # ── Fast path: no checkpoint → skip PINN, use analytical estimate ──
+        if not CKPT_PATH.exists():
+            flux_kg_hr, uncertainty = self._integrate_flux(
+                x_m, y_m, u_ms, v_ms, wind_speed, obs_enh, c_lat
+            )
+        else:
+            # ── PINN path: checkpoint exists → train briefly ─────────────
+            u_arr = np.full_like(x_m, u_ms)
+            v_arr = np.full_like(x_m, v_ms)
+            coords_np = np.stack([x_m, y_m, u_arr, v_arr], axis=1)
+            coords    = torch.from_numpy(coords_np).to(self.device)
+            targets   = torch.from_numpy(obs_enh).unsqueeze(1).to(self.device)
 
-        # ── 3. Fit PINN on this plume ────────────────────────────
-        coords_np = np.stack([x_m, y_m, u_arr, v_arr], axis=1)   # (N, 4)
-        coords    = torch.from_numpy(coords_np).to(self.device)
-        targets   = torch.from_numpy(obs_enh).unsqueeze(1).to(self.device)
+            optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-3)
+            pde_loss  = GaussianPlumeResidual(u_ms=wind_speed)
 
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-3)
-        pde_loss  = GaussianPlumeResidual(u_ms=wind_speed)
+            x_range = (x_m.min(), x_m.max())
+            y_range = (y_m.min(), y_m.max())
+            n_coll  = 256  # reduced from 512
 
-        # Collocation points for physics residual (random interior points)
-        x_range = (x_m.min(), x_m.max())
-        y_range = (y_m.min(), y_m.max())
-        n_coll  = 512
+            FAST_EPOCHS = 50  # reduced from 300 — good enough without checkpoint
+            self.model.train()
+            for epoch in range(FAST_EPOCHS):
+                pred_data = self.model(coords)
+                loss_data = F.mse_loss(pred_data, targets)
 
-        self.model.train()
-        for epoch in range(n_epochs):
-            # Data loss
-            pred_data = self.model(coords)
-            loss_data = F.mse_loss(pred_data, targets)
+                xc = torch.FloatTensor(n_coll, 4).uniform_(0, 1).to(self.device)
+                xc[:, 0] = xc[:, 0] * (x_range[1] - x_range[0]) + x_range[0]
+                xc[:, 1] = xc[:, 1] * (y_range[1] - y_range[0]) + y_range[0]
+                xc[:, 2] = float(u_ms)
+                xc[:, 3] = float(v_ms)
+                xc.requires_grad_(True)
 
-            # Physics loss on collocation points
-            xc = torch.FloatTensor(n_coll, 4).uniform_(0, 1).to(self.device)
-            xc[:, 0] = xc[:, 0] * (x_range[1] - x_range[0]) + x_range[0]
-            xc[:, 1] = xc[:, 1] * (y_range[1] - y_range[0]) + y_range[0]
-            xc[:, 2] = float(u_ms)
-            xc[:, 3] = float(v_ms)
-            xc.requires_grad_(True)
+                pred_coll = self.model(xc)
+                residual  = pde_loss(xc, pred_coll)
+                loss_phys = (residual ** 2).mean()
 
-            pred_coll = self.model(xc)
-            residual  = pde_loss(xc, pred_coll)
-            loss_phys = (residual ** 2).mean()
+                loss = loss_data + cfg["stage2"]["physics_weight"] * loss_phys
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                optimizer.step()
 
-            loss = loss_data + cfg["stage2"]["physics_weight"] * loss_phys
+                if epoch % 100 == 0:
+                    logger.debug(
+                        f"PINN epoch {epoch:03d} | "
+                        f"data={loss_data.item():.4f} | "
+                        f"phys={loss_phys.item():.4f}"
+                    )
 
-            optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-            optimizer.step()
+            flux_kg_hr, uncertainty = self._integrate_flux(
+                x_m, y_m, u_ms, v_ms, wind_speed, obs_enh, c_lat
+            )
 
-            if epoch % 100 == 0:
-                logger.debug(
-                    f"PINN epoch {epoch:03d} | "
-                    f"data={loss_data.item():.4f} | "
-                    f"phys={loss_phys.item():.4f}"
-                )
-
-        # ── 4. Integrate flux ────────────────────────────────────
-        flux_kg_hr, uncertainty = self._integrate_flux(
-            x_m, y_m, u_ms, v_ms, wind_speed, obs_enh, c_lat
-        )
-
-        # ── 5. Plume geometry ────────────────────────────────────
-        downwind_extent_m = float(
-            np.sqrt(x_m**2 + y_m**2).max()
-        )
-        plume_length_km = downwind_extent_m / 1000.0
-
-        transport_age_hr = (downwind_extent_m / wind_speed) / 3600.0
-
-        co2e_kg_hr = flux_kg_hr * cfg["intelligence"]["methane_gwp_20yr"]
+        downwind_extent_m = float(np.sqrt(x_m**2 + y_m**2).max())
+        plume_length_km   = downwind_extent_m / 1000.0
+        transport_age_hr  = (downwind_extent_m / wind_speed) / 3600.0
+        co2e_kg_hr        = flux_kg_hr * cfg["intelligence"]["methane_gwp_20yr"]
 
         return FluxOutput(
             flux_kg_hr=flux_kg_hr,

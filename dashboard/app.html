@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARGUS — Methane Intelligence</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;700;900&display=swap');
+:root{
+  --ink:#0a0a09;--mist:#8a8a87;--slate:#5a5a57;
+  --cream:#f5f4f0;--snow:#eeecea;--white:#ffffff;
+  --terra:#c94e1a;--terra2:#f0623a;--amber:#d97706;
+  --forest:#15803d;--crimson:#b91c1c;--steel:#1d4ed8;
+  --rule:rgba(10,10,9,0.09);--sidebar:#0d0d0c;
+  --glow:rgba(201,78,26,0.25);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);display:flex;height:100vh;overflow:hidden}
+#sidebar{width:252px;min-width:252px;background:var(--sidebar);display:flex;flex-direction:column;border-right:1px solid rgba(255,255,255,0.05);overflow-y:auto;flex-shrink:0}
+.sb-logo{padding:20px 16px 14px;border-bottom:1px solid rgba(255,255,255,0.06)}
+.sb-logo-row{display:flex;align-items:center;gap:11px}
+.sb-icon{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#c94e1a,#7c1d0a);display:flex;align-items:center;justify-content:center;font-size:1.1rem;box-shadow:0 4px 16px rgba(201,78,26,0.4);flex-shrink:0}
+.sb-name{font-family:'Space Mono',monospace;font-size:1.3rem;font-weight:700;color:#f0f0ee;line-height:1;letter-spacing:-0.02em}
+.sb-sub{font-size:0.42rem;color:#444441;letter-spacing:0.22em;text-transform:uppercase;margin-top:3px}
+.sb-section{padding:13px 14px 5px;font-family:'Space Mono',monospace;font-size:0.42rem;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#383836}
+.sb-status{margin:5px 9px;padding:9px 12px;border-radius:7px;font-size:0.6rem;font-weight:500;display:flex;align-items:center;gap:8px;transition:all 0.3s}
+.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;animation:pulse 2s infinite}
+.sb-control{padding:3px 9px 9px}
+.sb-label{font-size:0.5rem;color:#555553;margin-bottom:5px;display:flex;justify-content:space-between}
+.sb-label span{color:var(--terra)}
+.sb-select{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.09);color:#c0c0be;border-radius:6px;padding:8px 10px;font-size:0.7rem;outline:none;font-family:'DM Sans',sans-serif}
+.sb-btn{width:calc(100% - 18px);margin:3px 9px;padding:10px;background:var(--terra);border:none;color:white;font-weight:700;font-size:0.7rem;letter-spacing:0.05em;border-radius:7px;cursor:pointer;transition:all 0.2s;font-family:'DM Sans',sans-serif}
+.sb-btn:hover{background:var(--terra2);transform:translateY(-1px);box-shadow:0 4px 12px var(--glow)}
+.sb-btn.secondary{background:rgba(255,255,255,0.05);color:#888886}
+.sb-btn.secondary:hover{background:rgba(255,255,255,0.09);transform:translateY(-1px)}
+.sb-time{margin:7px 9px;padding:8px 11px;border-radius:6px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);font-family:'Space Mono',monospace;font-size:0.48rem;color:#444441;line-height:1.9}
+.sb-divider{height:1px;background:rgba(255,255,255,0.05);margin:7px 9px}
+.ep-row{margin:2px 9px;padding:6px 11px;border-radius:5px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);font-size:0.5rem;display:flex;justify-content:space-between;align-items:center;color:#4a4a47}
+.ep-dot{width:5px;height:5px;border-radius:50%;transition:background 0.5s}
+.noise-control{margin:5px 9px;padding:10px 11px;border-radius:7px;background:rgba(29,78,216,0.07);border:1px solid rgba(29,78,216,0.16)}
+.noise-label{font-size:0.48rem;color:#60a5fa;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
+.noise-slider{width:100%;-webkit-appearance:none;height:3px;border-radius:2px;background:rgba(255,255,255,0.10);outline:none;cursor:pointer}
+.noise-slider::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:#3b82f6;cursor:pointer;box-shadow:0 0 8px rgba(59,130,246,0.5)}
+.noise-meter{height:6px;border-radius:3px;background:rgba(255,255,255,0.06);overflow:hidden;margin:5px 0}
+.noise-fill{height:100%;border-radius:3px;transition:width 0.4s ease,background 0.4s ease}
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative}
+#topbar{padding:0 24px;height:50px;background:white;border-bottom:1px solid var(--rule);display:flex;align-items:center;gap:14px;flex-shrink:0;box-shadow:0 1px 3px rgba(10,10,9,0.04)}
+.ticker-wrap{flex:1;overflow:hidden;position:relative;height:30px}
+.ticker-wrap::before,.ticker-wrap::after{content:'';position:absolute;top:0;bottom:0;width:24px;z-index:2;pointer-events:none}
+.ticker-wrap::before{left:0;background:linear-gradient(90deg,white,transparent)}
+.ticker-wrap::after{right:0;background:linear-gradient(270deg,white,transparent)}
+.ticker-inner{display:flex;align-items:center;height:100%;animation:ticker 45s linear infinite;white-space:nowrap;font-size:0.56rem;color:var(--mist);font-family:'Space Mono',monospace}
+.ticker-inner span{padding:0 16px}
+@keyframes ticker{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+.live-badge{display:flex;align-items:center;gap:6px;font-family:'Space Mono',monospace;font-size:0.5rem;font-weight:700;color:var(--terra);letter-spacing:0.12em;text-transform:uppercase;white-space:nowrap}
+#last-update{font-family:'Space Mono',monospace;font-size:0.46rem;color:var(--mist);white-space:nowrap}
+#conn-mode{font-family:'Space Mono',monospace;font-size:0.46rem;color:var(--mist);font-weight:700;white-space:nowrap;border:1px solid var(--rule);padding:3px 8px;border-radius:4px}
+#kpi-strip{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding:12px 24px;flex-shrink:0;background:var(--cream);border-bottom:1px solid var(--rule)}
+.kpi-card{background:white;border:1px solid var(--rule);border-radius:10px;padding:14px 16px;box-shadow:0 1px 4px rgba(10,10,9,0.05);transition:all 0.25s;cursor:default;position:relative;overflow:hidden}
+.kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--terra);opacity:0;transition:opacity 0.3s}
+.kpi-card:hover{box-shadow:0 6px 20px rgba(10,10,9,0.10);transform:translateY(-2px)}
+.kpi-card:hover::before{opacity:1}
+.kpi-label{font-family:'Space Mono',monospace;font-size:0.42rem;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--mist);margin-bottom:6px}
+.kpi-value{font-size:1.65rem;font-weight:900;letter-spacing:-0.03em;line-height:1;transition:color 0.3s}
+.kpi-unit{font-size:0.68rem;font-weight:400;color:var(--mist);margin-left:2px}
+.kpi-delta{font-size:0.52rem;color:var(--mist);margin-top:4px}
+@keyframes kpiFlash{0%{background:#fff7ed}100%{background:white}}
+.kpi-card.flashing{animation:kpiFlash 0.5s ease}
+#tab-bar{display:flex;border-bottom:2px solid var(--rule);background:white;padding:0 24px;flex-shrink:0;gap:0;overflow-x:auto}
+.tab-btn{font-family:'DM Sans',sans-serif;font-size:0.63rem;font-weight:600;letter-spacing:0.03em;color:var(--mist);padding:11px 15px;border:none;background:transparent;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.15s;white-space:nowrap}
+.tab-btn.active{color:var(--ink);border-bottom-color:var(--terra);font-weight:700}
+.tab-btn:hover:not(.active){color:var(--slate)}
+.tab-btn.twist-tab{color:#60a5fa}
+.tab-btn.twist-tab.active{color:#3b82f6;border-bottom-color:#3b82f6}
+#tab-content{flex:1;overflow-y:auto;padding:20px 24px}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+.sec-hdr{margin-bottom:18px}
+.sec-hdr h2{font-size:1.25rem;font-weight:800;letter-spacing:-0.02em;margin-bottom:3px}
+.sec-hdr p{font-size:0.6rem;color:var(--mist)}
+.sec-rule{height:2px;background:linear-gradient(90deg,var(--terra),rgba(201,78,26,0.15),transparent);border-radius:2px;margin-top:10px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.card{background:white;border:1px solid var(--rule);border-radius:10px;padding:18px;box-shadow:0 1px 5px rgba(10,10,9,0.05)}
+#map-container{height:460px;border-radius:14px;overflow:hidden;position:relative;margin-bottom:14px;box-shadow:0 4px 24px rgba(10,10,9,0.10);border:1px solid var(--rule)}
+#leaflet-map{height:100%;width:100%}
+.leaflet-container{font-family:'DM Sans',sans-serif}
+.leaflet-control-zoom{border:none!important;box-shadow:0 2px 12px rgba(10,10,9,0.12)!important}
+.leaflet-control-zoom a{background:white!important;color:var(--ink)!important;border:1px solid var(--rule)!important;font-size:16px!important;font-weight:300!important;width:32px!important;height:32px!important;line-height:30px!important}
+.leaflet-control-zoom a:first-child{border-radius:8px 8px 0 0!important}
+.leaflet-control-zoom a:last-child{border-radius:0 0 8px 8px!important}
+.leaflet-control-zoom a:hover{background:var(--snow)!important}
+.leaflet-control-attribution{background:rgba(255,255,255,0.85)!important;backdrop-filter:blur(4px);font-size:9px!important;border-radius:6px 0 0 0!important;padding:3px 7px!important}
+#map-stats-overlay{position:absolute;top:14px;right:14px;z-index:999;background:rgba(255,255,255,0.92);backdrop-filter:blur(12px);border:1px solid var(--rule);border-radius:10px;padding:12px 14px;box-shadow:0 4px 20px rgba(10,10,9,0.10);min-width:160px;pointer-events:none}
+.map-stat-row{display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:0.58rem}
+.map-stat-row:not(:last-child){border-bottom:1px solid rgba(10,10,9,0.05);margin-bottom:3px}
+.map-stat-label{color:var(--mist);font-family:'Space Mono',monospace;font-size:0.42rem;text-transform:uppercase;letter-spacing:0.08em}
+.map-stat-value{font-weight:700;font-size:0.65rem}
+#map-legend{position:absolute;bottom:14px;left:14px;z-index:999;background:rgba(255,255,255,0.92);backdrop-filter:blur(12px);border:1px solid var(--rule);border-radius:10px;padding:10px 13px;box-shadow:0 4px 20px rgba(10,10,9,0.10);pointer-events:none}
+.legend-title{font-family:'Space Mono',monospace;font-size:0.4rem;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;color:var(--mist);margin-bottom:7px}
+.legend-row{display:flex;align-items:center;gap:7px;font-size:0.55rem;font-weight:600;margin-bottom:4px}
+.legend-row:last-child{margin-bottom:0}
+.legend-dot{width:10px;height:10px;border-radius:50%;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.2);flex-shrink:0}
+.leaflet-popup-content-wrapper{border-radius:10px!important;box-shadow:0 8px 32px rgba(10,10,9,0.14)!important;border:1px solid var(--rule)!important;padding:0!important}
+.leaflet-popup-content{margin:0!important;padding:14px 16px!important}
+.leaflet-popup-tip-container{display:none}
+.leaflet-popup-close-button{top:8px!important;right:10px!important;font-size:16px!important;color:var(--mist)!important;width:20px!important;height:20px!important;line-height:20px!important}
+.tbl-wrap{border:1px solid var(--rule);border-radius:8px;overflow:hidden;background:white}
+table{width:100%;border-collapse:collapse;font-size:0.63rem}
+thead th{background:var(--snow);padding:9px 11px;text-align:left;font-family:'Space Mono',monospace;font-size:0.44rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--mist);border-bottom:1px solid var(--rule)}
+tbody td{padding:8px 11px;border-bottom:1px solid rgba(10,10,9,0.04);vertical-align:middle}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--snow)}
+.pill{display:inline-flex;align-items:center;gap:3px;font-size:0.52rem;font-weight:700;padding:2px 8px;border-radius:20px;letter-spacing:0.05em;font-family:'Space Mono',monospace}
+.pill-dot{width:4px;height:4px;border-radius:50%;animation:pulse 2s infinite}
+.pill.CRITICAL{color:#b91c1c;background:rgba(185,28,28,0.07);border:1px solid rgba(185,28,28,0.18)}
+.pill.HIGH{color:#c94e1a;background:rgba(201,78,26,0.07);border:1px solid rgba(201,78,26,0.18)}
+.pill.MEDIUM{color:#d97706;background:rgba(217,119,6,0.07);border:1px solid rgba(217,119,6,0.18)}
+.pill.LOW{color:#15803d;background:rgba(21,128,61,0.07);border:1px solid rgba(21,128,61,0.18)}
+.chart-box{position:relative;height:250px}
+.chart-box.tall{height:310px}
+.chart-title{font-family:'Space Mono',monospace;font-size:0.48rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--mist);margin-bottom:10px}
+.big-number{font-size:2.4rem;font-weight:900;letter-spacing:-0.04em;line-height:1;color:var(--ink)}
+.big-label{font-family:'Space Mono',monospace;font-size:0.44rem;text-transform:uppercase;letter-spacing:0.14em;color:var(--mist);margin-bottom:7px;font-weight:700}
+.progress{height:4px;background:rgba(10,10,9,0.07);border-radius:2px;overflow:hidden;margin-top:10px}
+.progress-fill{height:100%;border-radius:2px;background:var(--terra);transition:width 0.8s ease}
+.econ-slider-wrap{padding:14px 18px;background:white;border:1px solid var(--rule);border-radius:10px;margin-bottom:14px}
+input[type=range].ui-range{width:100%;-webkit-appearance:none;height:4px;border-radius:2px;outline:none;cursor:pointer;background:rgba(10,10,9,0.08)}
+input[type=range].ui-range::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--terra);cursor:pointer;box-shadow:0 2px 8px var(--glow)}
+.comp-row{padding:11px 13px;border:1.5px solid;border-radius:8px;margin-bottom:6px;background:white;transition:transform 0.2s,box-shadow 0.2s}
+.comp-row:hover{transform:translateX(3px);box-shadow:0 3px 12px rgba(10,10,9,0.07)}
+.comp-bar-track{height:4px;background:rgba(10,10,9,0.06);border-radius:2px;margin-top:7px;overflow:hidden}
+.comp-bar-fill{height:4px;border-radius:2px;transition:width 0.8s ease}
+.alert-item{border:1.5px solid;border-left-width:4px;border-radius:8px;padding:11px 13px;margin-bottom:6px;background:white;animation:fadeUp 0.3s ease both;transition:transform 0.2s}
+.alert-item:hover{transform:translateX(4px)}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.alert-time{font-family:'Space Mono',monospace;font-size:0.46rem;color:var(--mist)}
+.alert-name{font-size:0.82rem;font-weight:700;color:var(--ink);margin:2px 0}
+.alert-meta{font-size:0.56rem;color:var(--mist)}
+.alert-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:8px}
+.alert-stat{background:var(--snow);border:1px solid var(--rule);border-radius:6px;padding:7px 9px}
+.alert-stat-label{font-family:'Space Mono',monospace;font-size:0.4rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--mist);margin-bottom:2px}
+.alert-stat-value{font-size:0.85rem;font-weight:800}
+.nov-card{border:2px solid;border-top-width:4px;border-radius:10px;background:white;padding:24px;box-shadow:0 4px 24px rgba(10,10,9,0.09);margin-top:14px}
+.nov-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}
+.nov-section{background:var(--snow);border:1.5px solid var(--rule);border-radius:8px;padding:14px}
+.nov-section-title{font-family:'Space Mono',monospace;font-size:0.42rem;text-transform:uppercase;letter-spacing:0.14em;color:var(--mist);font-weight:700;margin-bottom:9px}
+.action-row{display:flex;gap:11px;align-items:baseline;margin-bottom:9px;padding-left:13px;position:relative;font-size:0.63rem}
+.action-dot{position:absolute;left:-7px;top:4px;width:6px;height:6px;border-radius:50%;border:2px solid white}
+.action-time{font-weight:700;font-size:0.56rem;min-width:50px}
+.sys-comp{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-radius:6px;margin-bottom:3px;background:white;border:1px solid var(--rule);transition:background 0.2s}
+.sys-comp:hover{background:var(--snow)}
+.twist-badge{display:inline-flex;align-items:center;gap:4px;font-family:'Space Mono',monospace;font-size:0.44rem;font-weight:700;padding:2px 9px;border-radius:20px;letter-spacing:0.08em;text-transform:uppercase}
+.twist-badge.t1{color:#60a5fa;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.22)}
+.twist-badge.t2{color:#a78bfa;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.22)}
+.syn-alert{border:1.5px solid;border-left-width:4px;border-radius:8px;padding:10px 13px;margin-bottom:5px;background:white;animation:fadeUp 0.2s ease both;cursor:default;transition:transform 0.15s,box-shadow 0.15s}
+.syn-alert:hover{transform:translateX(3px);box-shadow:0 3px 12px rgba(10,10,9,0.08)}
+.agent-card{background:white;border:1px solid var(--rule);border-radius:10px;padding:16px;box-shadow:0 1px 5px rgba(10,10,9,0.05)}
+.agent-hdr{display:flex;align-items:center;gap:9px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--rule)}
+.agent-icon{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:0.95rem;flex-shrink:0}
+.agent-name{font-size:0.78rem;font-weight:700}
+.agent-status{font-size:0.48rem;color:var(--mist)}
+.brief-card{border:2px solid rgba(59,130,246,0.18);border-top:3px solid #3b82f6;border-radius:9px;padding:16px;background:white;margin-bottom:9px;animation:fadeUp 0.3s ease both;transition:box-shadow 0.2s}
+.brief-card:hover{box-shadow:0 4px 18px rgba(59,130,246,0.10)}
+.brief-rank{width:26px;height:26px;border-radius:50%;background:#3b82f6;color:white;display:flex;align-items:center;justify-content:center;font-family:'Space Mono',monospace;font-size:0.6rem;font-weight:700;flex-shrink:0}
+.denoise-panel{background:white;border:1px solid rgba(139,92,246,0.22);border-radius:10px;padding:16px;margin-bottom:10px}
+.snr-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--rule);font-size:0.6rem}
+.snr-row:last-child{border-bottom:none}
+.canvas-wrap{border-radius:9px;overflow:hidden;border:1px solid var(--rule);background:var(--snow);padding:11px;margin-bottom:10px}
+.modal-overlay{position:fixed;inset:0;background:rgba(10,10,9,0.55);z-index:1000;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity 0.25s}
+.modal-overlay.open{opacity:1;pointer-events:all}
+.modal-box{background:white;border-radius:14px;padding:28px;max-width:620px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:0 24px 80px rgba(10,10,9,0.18);transform:translateY(18px);transition:transform 0.25s;position:relative}
+.modal-overlay.open .modal-box{transform:translateY(0)}
+.modal-close{position:absolute;top:12px;right:14px;font-size:1.1rem;cursor:pointer;color:var(--mist);background:none;border:none;padding:4px 8px;border-radius:5px}
+.modal-close:hover{background:var(--snow);color:var(--ink)}
+#loading-overlay{position:absolute;inset:0;background:rgba(13,13,12,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:500;gap:16px;transition:opacity 0.4s ease;backdrop-filter:blur(4px)}
+#loading-overlay.hidden{opacity:0;pointer-events:none}
+#loading-overlay .lo-icon{font-size:2.6rem;animation:spin 2.5s linear infinite}
+#loading-overlay .lo-text{font-family:'Space Mono',monospace;color:#f0f0ee;font-size:0.85rem;font-weight:700;letter-spacing:0.06em}
+#loading-overlay .lo-sub{color:#444441;font-size:0.6rem;text-align:center;max-width:260px;font-family:'Space Mono',monospace}
+#loading-overlay .lo-bar{width:220px;height:2px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden}
+#loading-overlay .lo-bar-fill{height:100%;background:var(--terra);border-radius:2px;width:0;animation:loadBar 2s ease forwards}
+@keyframes loadBar{0%{width:0}100%{width:100%}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+/* Recovery cards */
+.rec-card{border:1.5px solid;border-left:4px solid;border-radius:10px;background:white;padding:14px 16px;margin-bottom:8px;transition:transform 0.2s,box-shadow 0.2s}
+.rec-card:hover{transform:translateX(3px);box-shadow:0 4px 14px rgba(10,10,9,0.08)}
+.rec-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}
+.rec-stat{background:var(--snow);border:1px solid var(--rule);border-radius:7px;padding:8px 10px}
+.rec-stat-label{font-family:'Space Mono',monospace;font-size:0.38rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--mist);margin-bottom:3px}
+.rec-stat-value{font-size:0.9rem;font-weight:800}
+.bio-badge{display:inline-flex;align-items:center;gap:3px;font-family:'Space Mono',monospace;font-size:0.44rem;font-weight:700;padding:2px 8px;border-radius:12px;letter-spacing:0.06em;text-transform:uppercase;border:1.5px solid}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:var(--snow)}
+::-webkit-scrollbar-thumb{background:rgba(10,10,9,0.13);border-radius:2px}
+@media(max-width:900px){#sidebar{display:none}#kpi-strip{grid-template-columns:repeat(2,1fr)}.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="modal-overlay" id="rib-modal" onclick="if(event.target===this)closeRIB()">
+  <div class="modal-box"><button class="modal-close" onclick="closeRIB()">✕</button><div id="rib-content"></div></div>
+</div>
+<div id="sidebar">
+  <div class="sb-logo">
+    <div class="sb-logo-row">
+      <div class="sb-icon">🛰️</div>
+      <div><div class="sb-name">ARGUS</div><div class="sb-sub">Methane Intelligence</div></div>
+    </div>
+  </div>
+  <div class="sb-section">System Status</div>
+  <div id="api-status" class="sb-status" style="background:rgba(217,119,6,0.09);border:1px solid rgba(217,119,6,0.20)">
+    <span class="dot" style="background:#f59e0b"></span><span style="color:#fbbf24;font-size:0.58rem">Checking API…</span>
+  </div>
+  <div class="sb-section">Endpoints</div>
+  <div class="ep-row"><span>Health</span><span class="ep-dot" id="dot-health" style="background:#333"></span></div>
+  <div class="ep-row"><span>Detections</span><span class="ep-dot" id="dot-det" style="background:#333"></span></div>
+  <div class="ep-row"><span>WebSocket</span><span class="ep-dot" id="dot-ws" style="background:#333"></span></div>
+  <div class="ep-row"><span>SSE Stream</span><span class="ep-dot" id="dot-sse" style="background:#333"></span></div>
+  <div class="sb-divider"></div>
+  <div class="sb-section" style="color:#60a5fa">🔵 Synthetic Feed</div>
+  <div style="margin:0 9px 7px;padding:9px 11px;border-radius:7px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.16)">
+    <div style="font-size:0.48rem;color:#60a5fa;margin-bottom:6px;font-weight:600;font-family:'Space Mono',monospace">SATELLITE STATUS</div>
+    <div style="display:flex;gap:7px;margin-bottom:7px">
+      <button class="sb-btn" style="flex:1;margin:0;font-size:0.58rem;padding:7px" onclick="setSatOnline(true)" id="sat-online-btn">🛰 Online</button>
+      <button class="sb-btn secondary" style="flex:1;margin:0;font-size:0.58rem;padding:7px" onclick="setSatOnline(false)" id="sat-offline-btn">📡 Offline</button>
+    </div>
+    <div id="sat-mode-label" style="font-size:0.46rem;color:#666664;text-align:center;font-family:'Space Mono',monospace">MODE: LIVE</div>
+  </div>
+  <div class="sb-control">
+    <div class="sb-label">Alerts/batch <span id="n-syn-label">10</span></div>
+    <input type="range" class="noise-slider" min="1" max="50" value="10" oninput="document.getElementById('n-syn-label').textContent=this.value;S.synBatchSize=parseInt(this.value)">
+  </div>
+  <button class="sb-btn" style="background:rgba(59,130,246,0.80)" onclick="generateSyntheticAlerts()">⚡ Generate Alerts</button>
+  <button class="sb-btn secondary" onclick="clearSynAlerts()">🗑 Clear Synthetic</button>
+  <div class="sb-divider"></div>
+  <div class="sb-section" style="color:#a78bfa">🟣 Sensor Noise</div>
+  <div class="noise-control">
+    <div class="noise-label"><span>Gaussian σ</span><span id="noise-val" style="font-family:'Space Mono',monospace;font-weight:700">0</span></div>
+    <input type="range" class="noise-slider" id="noise-slider" min="0" max="100" value="0" step="1" oninput="updateNoise(this.value)">
+    <div class="noise-meter" style="margin-top:7px"><div class="noise-fill" id="noise-fill-bar" style="width:0%;background:#3b82f6"></div></div>
+    <div id="noise-status" style="font-size:0.44rem;color:#555553;margin-top:3px;font-family:'Space Mono',monospace">DENOISER: STANDBY</div>
+  </div>
+  <div class="sb-divider"></div>
+  <div class="sb-section">Scan Region</div>
+  <div class="sb-control">
+    <select class="sb-select" id="region-select">
+      <option value="32,33,-104,-101">Permian Basin, USA</option>
+      <option value="37,40,55,60">Turkmenistan Gas Fields</option>
+      <option value="4,6,5,8">Niger Delta, Nigeria</option>
+      <option value="18,22,68,73">Mumbai Offshore, India</option>
+      <option value="26,28,49,51">Saudi East Arabia</option>
+      <option value="60,65,70,80">Siberia Gas Fields</option>
+      <option value="56,59,1,5">North Sea Platforms</option>
+    </select>
+  </div>
+  <button class="sb-btn" onclick="runPipeline()">▶ Run Pipeline</button>
+  <button class="sb-btn secondary" onclick="manualRefresh()">↺ Refresh Data</button>
+  <div class="sb-time" id="utc-clock">Loading…</div>
+</div>
+<div id="main">
+  <div id="loading-overlay">
+    <div class="lo-icon">🛰️</div>
+    <div class="lo-text">ARGUS INITIALISING</div>
+    <div class="lo-sub" id="lo-sub">Loading satellite data…</div>
+    <div class="lo-bar"><div class="lo-bar-fill"></div></div>
+  </div>
+  <div id="topbar">
+    <div class="live-badge"><span class="dot" style="background:var(--terra)"></span>LIVE</div>
+    <span id="conn-mode">⏱ LOADING</span>
+    <div class="ticker-wrap">
+      <div class="ticker-inner" id="ticker">
+        <span>🛰 ARGUS METHANE INTELLIGENCE</span><span>│</span><span>LOADING DATA…</span><span>│</span>
+        <span>🛰 ARGUS METHANE INTELLIGENCE</span><span>│</span><span>LOADING DATA…</span>
+      </div>
+    </div>
+    <div id="last-update">LOADING…</div>
+  </div>
+  <div id="kpi-strip">
+    <div class="kpi-card"><div class="kpi-label">Emitters Detected</div><div class="kpi-value" id="k-count" style="color:var(--terra)">—</div><div class="kpi-delta" id="k-count-d"></div></div>
+    <div class="kpi-card"><div class="kpi-label">Critical Alerts</div><div class="kpi-value" id="k-crit" style="color:var(--crimson)">—</div><div class="kpi-delta" id="k-crit-d"></div></div>
+    <div class="kpi-card"><div class="kpi-label">Total Flux</div><div class="kpi-value" id="k-flux" style="color:var(--amber)">—<span class="kpi-unit">kg/hr</span></div><div class="kpi-delta" id="k-flux-d"></div></div>
+    <div class="kpi-card"><div class="kpi-label">Economic Impact</div><div class="kpi-value" id="k-econ" style="color:var(--terra)">—<span class="kpi-unit">₹Cr/30d</span></div><div class="kpi-delta"></div></div>
+    <div class="kpi-card"><div class="kpi-label">CO₂ Equivalent</div><div class="kpi-value" id="k-co2" style="color:var(--forest)">—<span class="kpi-unit">t/hr</span></div><div class="kpi-delta"></div></div>
+  </div>
+  <div id="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('map',this)">🌍 Global Map</button>
+    <button class="tab-btn" onclick="switchTab('compliance',this)">📊 Compliance</button>
+    <button class="tab-btn" onclick="switchTab('economics',this)">💰 Economics</button>
+    <button class="tab-btn" onclick="switchTab('recovery',this)">♻ Recovery</button>
+    <button class="tab-btn" onclick="switchTab('enforcement',this)">📋 Enforcement</button>
+    <button class="tab-btn twist-tab" onclick="switchTab('twist1',this)">🔵 Synthetic Feed</button>
+    <button class="tab-btn twist-tab" onclick="switchTab('twist2',this)">🟣 Denoiser</button>
+    <button class="tab-btn" onclick="switchTab('alerts',this)">🔔 Live Alerts</button>
+    <button class="tab-btn" onclick="switchTab('system',this)">⚙ System</button>
+  </div>
+  <div id="tab-content">
+    <div class="tab-panel active" id="panel-map">
+      <div class="sec-hdr"><h2>🌍 Global Plume Monitor</h2><p>Live satellite detections · click any marker for details · bubble size ∝ flux rate</p><div class="sec-rule"></div></div>
+      <div id="map-container">
+        <div id="leaflet-map"></div>
+        <div id="map-stats-overlay">
+          <div class="legend-title">Live Stats</div>
+          <div class="map-stat-row"><span class="map-stat-label">Detections</span><span class="map-stat-value" id="ms-count" style="color:var(--terra)">—</span></div>
+          <div class="map-stat-row"><span class="map-stat-label">Critical</span><span class="map-stat-value" id="ms-crit" style="color:var(--crimson)">—</span></div>
+          <div class="map-stat-row"><span class="map-stat-label">Total Flux</span><span class="map-stat-value" id="ms-flux" style="color:var(--amber)">— kg/hr</span></div>
+          <div class="map-stat-row"><span class="map-stat-label">Source</span><span class="map-stat-value" id="ms-source" style="color:var(--forest);font-size:0.5rem">—</span></div>
+        </div>
+        <div id="map-legend">
+          <div class="legend-title">Risk Level</div>
+          <div class="legend-row"><div class="legend-dot" style="background:#b91c1c"></div><span style="color:#b91c1c">Critical ≥300 kg/hr</span></div>
+          <div class="legend-row"><div class="legend-dot" style="background:#c94e1a"></div><span style="color:#c94e1a">High ≥100 kg/hr</span></div>
+          <div class="legend-row"><div class="legend-dot" style="background:#d97706"></div><span style="color:#d97706">Medium ≥40 kg/hr</span></div>
+          <div class="legend-row"><div class="legend-dot" style="background:#15803d"></div><span style="color:#15803d">Low &lt;40 kg/hr</span></div>
+          <div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--rule)">
+            <div class="legend-row"><div class="legend-dot" style="background:#888;border-color:#60a5fa;border-width:2px"></div><span style="color:var(--mist)">Synthetic</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="tbl-wrap">
+        <table><thead><tr><th>ID</th><th>Facility</th><th>Operator</th><th>Flux kg/hr</th><th>CO₂e kg/hr</th><th>Conf %</th><th>Risk</th><th>Source</th><th>Lat</th><th>Lon</th></tr></thead>
+        <tbody id="det-table-body"></tbody></table>
+      </div>
+    </div>
+    <div class="tab-panel" id="panel-compliance">
+      <div class="sec-hdr"><h2>📊 Operator Compliance Registry</h2><p>Score 0–100 · lower = worse · sorted by severity</p><div class="sec-rule"></div></div>
+      <div class="grid-2" style="margin-bottom:14px">
+        <div class="card"><div class="chart-title">Compliance Scores</div><div class="chart-box"><canvas id="comp-chart"></canvas></div></div>
+        <div class="card"><div class="chart-title">Risk Distribution</div><div class="chart-box"><canvas id="risk-pie-chart"></canvas></div></div>
+      </div>
+      <div id="comp-cards"></div>
+    </div>
+    <div class="tab-panel" id="panel-economics">
+      <div class="sec-hdr"><h2>💰 Economic Impact Analysis</h2><p>Drag the slider — instant update</p><div class="sec-rule"></div></div>
+      <div class="econ-slider-wrap">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px">
+          <span style="font-size:0.6rem;font-weight:700">Projection Window</span>
+          <span style="font-size:1rem;font-weight:900;color:var(--terra)" id="econ-days-label">30 days</span>
+        </div>
+        <input type="range" class="ui-range" id="econ-slider" min="1" max="90" value="30" oninput="updateEconomics(this.value)">
+      </div>
+      <div class="grid-4" style="margin-bottom:14px">
+        <div class="card" style="grid-column:span 2;border-top:3px solid var(--terra)">
+          <div class="big-label">Total Liability</div><div class="big-number" id="e-total">—</div>
+          <div style="font-size:0.58rem;color:var(--mist);margin-top:5px" id="e-total-usd">—</div>
+          <div class="progress"><div class="progress-fill" id="e-progress"></div></div>
+          <div style="font-size:0.5rem;color:var(--mist);margin-top:4px" id="e-bench">—</div>
+        </div>
+        <div class="card"><div class="big-label" style="color:var(--terra)">⛽ Gas Lost</div><div style="font-size:1.4rem;font-weight:900;color:var(--terra)" id="e-gas">—</div><div style="font-size:0.56rem;color:var(--mist);margin-top:3px" id="e-gas-sub">—</div></div>
+        <div class="card"><div class="big-label" style="color:var(--forest)">🌍 Carbon + Fine</div><div style="font-size:1.4rem;font-weight:900;color:var(--crimson)" id="e-fine">—</div><div style="font-size:0.56rem;color:var(--mist);margin-top:3px">@ $50/t CO₂e regulatory</div></div>
+      </div>
+      <div class="grid-2" style="margin-bottom:14px">
+        <div class="card"><div class="chart-title">Cumulative Liability (₹ Crore)</div><div class="chart-box tall"><canvas id="econ-proj-chart"></canvas></div></div>
+        <div class="card"><div class="chart-title">Cost Breakdown by Facility (Top 8)</div><div class="chart-box tall"><canvas id="econ-stack-chart"></canvas></div></div>
+      </div>
+      <div class="tbl-wrap"><table><thead><tr><th>Facility</th><th>Flux</th><th>CH₄ t</th><th>CO₂e t</th><th>Gas $</th><th>Carbon $</th><th>Fine $</th><th>Total ₹L</th><th>Risk</th></tr></thead><tbody id="econ-table-body"></tbody></table></div>
+    </div>
+    <!-- Recovery Tab — redesigned -->
+    <div class="tab-panel" id="panel-recovery">
+      <div class="sec-hdr"><h2>♻ Biogas Recovery Intelligence</h2><p>Biogenic vs thermogenic classification · clean energy yield · revenue projections per site</p><div class="sec-rule"></div></div>
+      <!-- Summary KPIs -->
+      <div id="recovery-kpis" class="grid-4" style="margin-bottom:16px"></div>
+      <!-- Charts row -->
+      <div class="grid-2" style="margin-bottom:16px">
+        <div class="card">
+          <div class="chart-title">Source Classification Breakdown</div>
+          <div class="chart-box"><canvas id="bio-pie-chart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="chart-title">Recovery Potential by Site (kW)</div>
+          <div class="chart-box"><canvas id="bio-bar-chart"></canvas></div>
+        </div>
+      </div>
+      <!-- Revenue chart -->
+      <div class="card" style="margin-bottom:16px">
+        <div class="chart-title">Annual Biogas Revenue Projection by Site (₹ Lakh/yr)</div>
+        <div class="chart-box tall"><canvas id="bio-rev-chart"></canvas></div>
+      </div>
+      <!-- Per-site cards -->
+      <div id="recovery-cards"></div>
+    </div>
+    <div class="tab-panel" id="panel-enforcement">
+      <div class="sec-hdr"><h2>📋 Notices of Violation</h2><p>Auto-generated · CPCB / MoEF&CC · select a detection below</p><div class="sec-rule"></div></div>
+      <div style="margin-bottom:12px">
+        <label style="font-family:'Space Mono',monospace;font-size:0.44rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--mist);display:block;margin-bottom:6px">Select Detection</label>
+        <select id="nov-select" onchange="renderNOV()" style="width:100%;padding:10px 13px;border:1.5px solid var(--rule);border-radius:8px;font-size:0.72rem;background:white;color:var(--ink);outline:none;cursor:pointer;font-family:'DM Sans',sans-serif"></select>
+      </div>
+      <div id="nov-content"></div>
+    </div>
+    <div class="tab-panel" id="panel-twist1">
+      <div class="sec-hdr">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:5px"><h2>🔵 Synthetic Feed + Multi-Agent Pipeline</h2><span class="twist-badge t1">ACTIVE</span></div>
+        <p>Satellite offline fallback · synthetic alert generator · FP-filter agent · Brief agent for top-5 leaks</p>
+        <div class="sec-rule" style="background:linear-gradient(90deg,#3b82f6,rgba(59,130,246,0.15),transparent)"></div>
+      </div>
+      <div id="sat-banner" style="padding:11px 14px;border-radius:9px;margin-bottom:16px;display:flex;align-items:center;gap:11px;font-size:0.63rem;font-weight:600;transition:all 0.4s">
+        <span style="font-size:1rem" id="sat-banner-icon">🛰️</span><span id="sat-banner-text">Satellite feed: ONLINE — real data active</span>
+      </div>
+      <div class="grid-3" style="margin-bottom:18px">
+        <div class="agent-card">
+          <div class="agent-hdr"><div class="agent-icon" style="background:rgba(59,130,246,0.10)">⚡</div><div><div class="agent-name">Alert Generator</div><div class="agent-status" id="gen-status">Idle</div></div></div>
+          <div style="font-size:0.58rem;color:var(--mist);line-height:1.7">Generates synthetic methane alert JSON with GPS coordinates, flux rate, wind vector (u,v), and MC-dropout confidence score.</div>
+          <div style="margin-top:10px;display:flex;gap:7px">
+            <div style="flex:1;background:var(--snow);border-radius:6px;padding:7px;text-align:center"><div style="font-family:'Space Mono',monospace;font-size:0.4rem;color:var(--mist);text-transform:uppercase;letter-spacing:0.08em">Generated</div><div style="font-size:1rem;font-weight:800;color:#3b82f6" id="gen-count">0</div></div>
+            <div style="flex:1;background:var(--snow);border-radius:6px;padding:7px;text-align:center"><div style="font-family:'Space Mono',monospace;font-size:0.4rem;color:var(--mist);text-transform:uppercase;letter-spacing:0.08em">Confirmed</div><div style="font-size:1rem;font-weight:800;color:var(--forest)" id="gen-confirmed">0</div></div>
+            <div style="flex:1;background:var(--snow);border-radius:6px;padding:7px;text-align:center"><div style="font-family:'Space Mono',monospace;font-size:0.4rem;color:var(--mist);text-transform:uppercase;letter-spacing:0.08em">FP Filtered</div><div style="font-size:1rem;font-weight:800;color:var(--amber)" id="gen-fp">0</div></div>
+          </div>
+        </div>
+        <div class="agent-card">
+          <div class="agent-hdr"><div class="agent-icon" style="background:rgba(217,119,6,0.10)">🔍</div><div><div class="agent-name">FP-Filter Agent</div><div class="agent-status" id="fp-status">Idle</div></div></div>
+          <div style="font-size:0.58rem;color:var(--mist);line-height:1.7">Cross-references alerts against facility database. Filters low-confidence (< 0.45), high-uncertainty (σ² > 0.22), and within-permit events.</div>
+          <div style="margin-top:10px">
+            <div style="font-size:0.48rem;color:var(--mist);margin-bottom:4px">Precision</div>
+            <div style="height:5px;background:rgba(10,10,9,0.07);border-radius:2px;overflow:hidden"><div id="fp-precision-bar" style="height:100%;background:var(--forest);border-radius:2px;width:0%;transition:width 0.8s ease"></div></div>
+            <div style="font-size:0.63rem;font-weight:700;color:var(--forest);margin-top:3px" id="fp-precision-val">—</div>
+          </div>
+        </div>
+        <div class="agent-card">
+          <div class="agent-hdr"><div class="agent-icon" style="background:rgba(185,28,28,0.09)">📋</div><div><div class="agent-name">Brief Agent</div><div class="agent-status" id="brief-status">Awaiting top-5</div></div></div>
+          <div style="font-size:0.58rem;color:var(--mist);line-height:1.7">Drafts Regulatory Intervention Briefs for the 5 highest-risk confirmed leaks with operator details and fine estimates.</div>
+          <div style="margin-top:10px"><button class="sb-btn" style="width:100%;margin:0;font-size:0.6rem" onclick="draftBriefs()">📋 Draft Top-5 RIBs</button></div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <span style="font-family:'Space Mono',monospace;font-size:0.44rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--mist)">Synthetic Alert Stream</span>
+        <span style="font-family:'Space Mono',monospace;font-size:0.52rem;padding:3px 9px;border-radius:4px;background:rgba(59,130,246,0.07);border:1px solid rgba(59,130,246,0.18);color:#3b82f6" id="stream-status">IDLE</span>
+      </div>
+      <div id="syn-alert-feed" style="max-height:360px;overflow-y:auto"></div>
+      <div id="rib-section" style="margin-top:18px;display:none">
+        <div style="font-family:'Space Mono',monospace;font-size:0.44rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--mist);margin-bottom:10px">Top-5 Regulatory Intervention Briefs</div>
+        <div id="rib-cards"></div>
+      </div>
+    </div>
+    <div class="tab-panel" id="panel-twist2">
+      <div class="sec-hdr">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:5px"><h2>🟣 Gaussian Denoiser</h2><span class="twist-badge t2">PRE-SEGMENTATION</span></div>
+        <p>Sensor degraded by Gaussian noise · Wiener adaptive filter applied before ViT segmentation · SNR improvement visualised live</p>
+        <div class="sec-rule" style="background:linear-gradient(90deg,#7c3aed,rgba(124,58,237,0.15),transparent)"></div>
+      </div>
+      <div class="grid-2" style="margin-bottom:14px">
+        <div>
+          <div class="denoise-panel">
+            <div style="font-size:0.63rem;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:7px">🔬 Sensor Noise Configuration <span class="twist-badge t2" id="denoise-active-badge" style="display:none">ACTIVE</span></div>
+            <div style="margin-bottom:12px">
+              <div style="display:flex;justify-content:space-between;font-size:0.58rem;margin-bottom:5px"><span>Gaussian σ</span><strong id="noise-display">0 (clean)</strong></div>
+              <input type="range" class="ui-range" id="noise-slider-t2" min="0" max="100" value="0" step="1" oninput="syncNoise(this.value)" style="background:linear-gradient(90deg,#7c3aed 0%,rgba(10,10,9,0.07) 0%)">
+            </div>
+            <div class="snr-row"><span>Raw SNR</span><strong id="snr-raw" style="color:var(--crimson)">∞ dB (clean)</strong></div>
+            <div class="snr-row"><span>Post-denoise SNR</span><strong id="snr-denoised" style="color:var(--forest)">∞ dB</strong></div>
+            <div class="snr-row"><span>SNR gain</span><strong id="snr-gain" style="color:#3b82f6">+0 dB</strong></div>
+            <div class="snr-row"><span>FP reduction</span><strong id="fp-reduction" style="color:var(--amber)">0%</strong></div>
+            <div class="snr-row"><span>Denoiser stage</span><strong style="color:var(--mist)">Pre-ViT segmentation</strong></div>
+            <div class="snr-row"><span>Kernel type</span><strong style="color:var(--mist)">Wiener adaptive (w=5)</strong></div>
+          </div>
+          <div class="card" style="margin-top:10px"><div class="chart-title">Pipeline Stage Impact</div><div class="chart-box"><canvas id="denoise-impact-chart"></canvas></div></div>
+        </div>
+        <div>
+          <div class="card canvas-wrap" style="margin-bottom:10px"><div class="chart-title">Live Signal — Raw vs Denoised vs True</div><canvas id="signal-canvas" height="120" style="width:100%"></canvas></div>
+          <div class="card"><div class="chart-title">Noise Distribution (Gaussian PDF)</div><div class="chart-box"><canvas id="noise-dist-chart"></canvas></div></div>
+        </div>
+      </div>
+      <div class="card"><div class="chart-title">Per-Alert Denoiser Log</div>
+        <div class="tbl-wrap" style="border:none;box-shadow:none">
+          <table><thead><tr><th>Alert ID</th><th>Facility</th><th>Flux kg/hr</th><th>Raw SNR dB</th><th>Denoised SNR dB</th><th>Gain dB</th><th>FP after denoise?</th></tr></thead>
+          <tbody id="denoise-log"></tbody></table>
+        </div>
+      </div>
+    </div>
+    <div class="tab-panel" id="panel-alerts">
+      <div class="sec-hdr"><h2>🔔 Live Alert Feed</h2><p>Live from MongoDB + synthetic engine · FP filter active</p><div class="sec-rule"></div></div>
+      <div style="display:flex;gap:9px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+        <input type="number" id="n-gen-input" value="10" min="1" max="50" style="width:75px;padding:8px 11px;border:1.5px solid var(--rule);border-radius:7px;font-size:0.72rem;outline:none;background:white;font-family:'DM Sans',sans-serif">
+        <button class="sb-btn" style="width:auto;margin:0;padding:9px 18px" onclick="generateAlerts()">⚡ Generate Synthetic</button>
+        <button class="sb-btn secondary" style="width:auto;margin:0;padding:9px 18px" onclick="clearAlerts()">🗑 Clear</button>
+        <div style="flex:1"></div>
+        <div id="alert-kpis" style="display:flex;gap:9px"></div>
+      </div>
+      <div class="grid-2" style="margin-bottom:12px">
+        <div class="card"><div class="chart-title">Alert Risk Distribution</div><div class="chart-box"><canvas id="alert-pie-chart"></canvas></div></div>
+        <div class="card"><div class="chart-title">Flux Histogram</div><div class="chart-box"><canvas id="alert-hist-chart"></canvas></div></div>
+      </div>
+      <div id="alert-feed"></div>
+    </div>
+    <div class="tab-panel" id="panel-system">
+      <div class="sec-hdr"><h2>⚙ System Status</h2><p>Component health · pipeline timing · API endpoint matrix</p><div class="sec-rule"></div></div>
+      <div class="grid-2">
+        <div><p style="font-family:'Space Mono',monospace;font-size:0.44rem;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--mist);margin-bottom:9px">Component Health</p><div id="sys-components"></div></div>
+        <div>
+          <p style="font-family:'Space Mono',monospace;font-size:0.44rem;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--mist);margin-bottom:9px">Pipeline Timing</p>
+          <div id="sys-timing"></div>
+          <p style="font-family:'Space Mono',monospace;font-size:0.44rem;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--mist);margin-bottom:9px;margin-top:18px">API Endpoint Matrix</p>
+          <div id="sys-endpoints"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+'use strict';
+const API_BASE='http://localhost:8000/api/v1';
+const EP={health:`${API_BASE}/health`,detections:`${API_BASE}/detections?limit=500`,alerts:`${API_BASE}/alerts`,scorecard:`${API_BASE}/scorecard`,detect:`${API_BASE}/detect`,ws:`ws://localhost:8000/ws/detections`,sse:`${API_BASE}/stream`};
+const RISK_COLOR={CRITICAL:'#b91c1c',HIGH:'#c94e1a',MEDIUM:'#d97706',LOW:'#15803d'};
+const RISK_BG={CRITICAL:'rgba(185,28,28,0.07)',HIGH:'rgba(201,78,26,0.07)',MEDIUM:'rgba(217,119,6,0.07)',LOW:'rgba(21,128,61,0.07)'};
+const RISK_BD={CRITICAL:'rgba(185,28,28,0.18)',HIGH:'rgba(201,78,26,0.18)',MEDIUM:'rgba(217,119,6,0.18)',LOW:'rgba(21,128,61,0.18)'};
+
+// Biogenic probability priors — higher = more likely recoverable biogas
+const BIO_PRIOR={
+  landfill:0.96,
+  wastewater:0.93,
+  biogas_plant:0.98,
+  agricultural:0.91,
+  coal_mine:0.06,
+  oil_wellpad:0.04,
+  gas_compressor:0.03,
+  lng_terminal:0.02,
+  pipeline:0.04,
+  refinery:0.03,
+  unknown:0.35
+};
+
+const FACILITY_DB=[
+  {id:'FAC-IN-001',name:'Haldia Petrochem',operator:'HPCL',lat:22.06,lon:88.07,type:'refinery',permit:90},
+  {id:'FAC-IN-002',name:'Gujarat Gas Comp-7',operator:'GAIL India',lat:22.30,lon:73.10,type:'gas_compressor',permit:80},
+  {id:'FAC-IN-003',name:'Mumbai Offshore BH-3',operator:'ONGC',lat:19.20,lon:72.80,type:'oil_wellpad',permit:70},
+  {id:'FAC-IN-004',name:'Pune MSWM Site',operator:'PCMC',lat:18.52,lon:73.85,type:'landfill',permit:25},
+  {id:'FAC-IN-005',name:'Ghazipur Landfill',operator:'EDMC Delhi',lat:28.63,lon:77.33,type:'landfill',permit:20},
+  {id:'FAC-IN-006',name:'Kochi WWT Plant',operator:'KSPCB',lat:9.94,lon:76.26,type:'wastewater',permit:18},
+  {id:'FAC-IN-007',name:'Chennai WWTP-3',operator:'CMWSSB',lat:13.02,lon:80.22,type:'wastewater',permit:15},
+  {id:'FAC-IN-008',name:'Nashik Biogas Facility',operator:'NMC Energy',lat:19.99,lon:73.79,type:'biogas_plant',permit:30},
+  {id:'FAC-IN-009',name:'Ludhiana Biodigester',operator:'Punjab Agri',lat:30.90,lon:75.85,type:'agricultural',permit:22},
+  {id:'FAC-PK-001',name:'Sui Gas Field G-4',operator:'SSGC Pakistan',lat:28.60,lon:69.20,type:'gas_compressor',permit:75},
+  {id:'FAC-CN-001',name:'Tarim Basin LNG-9',operator:'CNPC',lat:41.20,lon:83.80,type:'lng_terminal',permit:110},
+  {id:'FAC-RU-001',name:'Orenburg Gas Plant',operator:'GazpromNeft',lat:51.80,lon:55.10,type:'gas_compressor',permit:120},
+  {id:'FAC-NG-001',name:'Niger Delta P-12',operator:'Gulf Stream',lat:5.20,lon:6.40,type:'oil_wellpad',permit:80},
+  {id:'FAC-US-001',name:'Permian Basin WP-7',operator:'OilCorp Intl',lat:32.10,lon:-102.50,type:'oil_wellpad',permit:95},
+  {id:'FAC-SA-001',name:'Ghawar East Field',operator:'Saudi Aramco',lat:25.10,lon:49.30,type:'oil_wellpad',permit:130},
+  {id:'FAC-EU-001',name:'North Sea Platform',operator:'BritGas PLC',lat:57.50,lon:2.40,type:'gas_compressor',permit:100},
+  {id:'FAC-DE-001',name:'Ruhr Valley Chem',operator:'RheinChem GmbH',lat:51.50,lon:7.10,type:'refinery',permit:85},
+  {id:'FAC-AU-001',name:'Bowen Basin Mine',operator:'Pacific Coal',lat:-23.50,lon:148.20,type:'coal_mine',permit:60},
+  {id:'FAC-BR-001',name:'Bandeirantes Landfill',operator:'PMSP Brazil',lat:-23.52,lon:-46.73,type:'landfill',permit:28},
+  {id:'FAC-ZA-001',name:'Bisasar Rd WWTP',operator:'eThekwini',lat:-29.87,lon:30.97,type:'wastewater',permit:16},
+  {id:'FAC-TM-001',name:'Galkynysh Gas Field',operator:'Turkmengaz',lat:38.50,lon:58.30,type:'gas_compressor',permit:130},
+  {id:'FAC-US-002',name:'Fresh Kills Landfill',operator:'NYC Sanitation',lat:40.57,lon:-74.18,type:'landfill',permit:22},
+  {id:'FAC-DE-002',name:'Munich Biogas Plant',operator:'Stadtwerke München',lat:48.14,lon:11.56,type:'biogas_plant',permit:35},
+  {id:'FAC-CN-002',name:'Beijing WWTP-7',operator:'Shougang Group',lat:39.91,lon:116.38,type:'wastewater',permit:20},
+];
+
+const S={detections:[],scorecard:[],usingAPI:false,synAlerts:[],liveAlerts:[],apiOnline:false,wsConnected:false,sseConnected:false,ws:null,sse:null,econDays:30,charts:{},lastFlux:0,lastCrit:0,lastCount:0,epAvail:{detections:true,alerts:true,scorecard:true},timing:{},satOnline:true,synBatchSize:10,synGenerated:0,synConfirmed:0,synFP:0,ribs:[],denoiseLog:[],noiseSigma:0,mapInitialised:false,leafletMap:null,mapMarkers:[]};
+const g=id=>document.getElementById(id);
+const riskOf=d=>(d.enforcement&&d.enforcement.risk_level)?d.enforcement.risk_level:fluxToRisk(d.flux_kg_hr||0);
+const attrOf=(d,k,def='?')=>((d.attribution||{})[k])||def;
+const fluxToRisk=f=>f>=300?'CRITICAL':f>=100?'HIGH':f>=40?'MEDIUM':'LOW';
+const pill=r=>`<span class="pill ${r}"><span class="pill-dot" style="background:${RISK_COLOR[r]||'#888'}"></span>${r}</span>`;
+const fmt=(n,d=0)=>Number(n).toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d});
+const rand=(lo,hi)=>lo+Math.random()*(hi-lo);
+const randG=(mu,sig)=>{let u=0,v=0;while(!u)u=Math.random();while(!v)v=Math.random();return mu+sig*Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);};
+const destroy=id=>{if(S.charts[id]){S.charts[id].destroy();delete S.charts[id];}};
+const timeNow=()=>new Date().toLocaleTimeString();
+function dotColor(id,ok){const el=g(id);if(!el)return;el.style.background=ok?'#16a34a':ok===false?'#dc2626':'#555';}
+function deltaArrow(now,prev){if(!prev||now===prev)return '';const pct=((now-prev)/prev*100).toFixed(1);return now>prev?`<span style="color:#b91c1c">▲${pct}%</span>`:`<span style="color:#15803d">▼${Math.abs(pct)}%</span>`;}
+function switchTab(name,btn){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  g(`panel-${name}`).classList.add('active');
+  if(btn)btn.classList.add('active');
+  if(name==='map'){setTimeout(()=>{if(S.leafletMap)S.leafletMap.invalidateSize();},50);}
+  if(name==='twist2')drawSignalCanvas();
+  if(name==='alerts')renderAlerts();
+}
+function tickClock(){const now=new Date();g('utc-clock').innerHTML=`UTC: ${now.toUTCString().slice(17,25)}\nLocal: ${now.toLocaleTimeString()}\nMode: ${S.apiOnline?'LIVE':'SATELLITE'}`;}
+setInterval(tickClock,1000);tickClock();
+
+function normalise(d){
+  const flux=parseFloat(d.flux_kg_hr)||0;
+  const attr_in=d.attribution||{};const enf_in=d.enforcement||{};
+  return {detection_id:d.detection_id||d.label_id||Math.random(),centroid_lat:parseFloat(d.centroid_lat)||0,centroid_lon:parseFloat(d.centroid_lon)||0,flux_kg_hr:flux,co2e_kg_hr:parseFloat(d.co2e_kg_hr)||flux*80,confidence:parseFloat(d.confidence||d.mean_probability)||0,epistemic_variance:parseFloat(d.epistemic_variance)||0,high_confidence:!!d.high_confidence,run_id:d.run_id,timestamp:d.timestamp,attribution:{facility_name:attr_in.facility_name||d.facility_name||'Unknown',operator:attr_in.operator||d.operator||'Unknown',facility_id:attr_in.facility_id||d.facility_id||'',facility_type:attr_in.facility_type||d.facility_type||'unknown',distance_km:parseFloat(attr_in.distance_km||d.distance_km||0)},enforcement:{risk_level:enf_in.risk_level||d.risk_level||fluxToRisk(flux),notice_id:enf_in.notice_id||d.notice_id||''},economics:d.economics||{total_cost_inr:flux*720*80/1000*50*83.5},source:'live'};
+}
+
+// ── EXPANDED DEMO DATA — 28 detections across all risk levels ───────────────
+function seedMockData(){
+  const DEMO=[
+    // CRITICAL
+    {detection_id:'DM001',centroid_lat:38.50,centroid_lon:58.30,flux_kg_hr:487,co2e_kg_hr:38960,confidence:0.94,epistemic_variance:0.04,attribution:{facility_name:'Galkynysh Gas Field',operator:'Turkmengaz',facility_type:'gas_compressor',facility_id:'FAC-TM-001',distance_km:1.2},enforcement:{risk_level:'CRITICAL',notice_id:'NOV-DM001'},economics:{total_cost_inr:2890000},source:'live'},
+    {detection_id:'DM002',centroid_lat:5.32,centroid_lon:6.55,flux_kg_hr:312,co2e_kg_hr:24960,confidence:0.89,epistemic_variance:0.06,attribution:{facility_name:'Niger Delta P-12',operator:'Gulf Stream',facility_type:'oil_wellpad',facility_id:'FAC-NG-001',distance_km:0.8},enforcement:{risk_level:'CRITICAL',notice_id:'NOV-DM002'},economics:{total_cost_inr:1850000},source:'live'},
+    {detection_id:'DM003',centroid_lat:51.85,centroid_lon:55.20,flux_kg_hr:267,co2e_kg_hr:21360,confidence:0.91,epistemic_variance:0.05,attribution:{facility_name:'Orenburg Gas Plant',operator:'GazpromNeft',facility_type:'gas_compressor',facility_id:'FAC-RU-001',distance_km:1.5},enforcement:{risk_level:'CRITICAL',notice_id:'NOV-DM003'},economics:{total_cost_inr:1584000},source:'live'},
+    // HIGH
+    {detection_id:'DM004',centroid_lat:32.15,centroid_lon:-102.40,flux_kg_hr:198,co2e_kg_hr:15840,confidence:0.87,epistemic_variance:0.08,attribution:{facility_name:'Permian Basin WP-7',operator:'OilCorp Intl',facility_type:'oil_wellpad',facility_id:'FAC-US-001',distance_km:2.1},enforcement:{risk_level:'HIGH',notice_id:'NOV-DM004'},economics:{total_cost_inr:1175000},source:'live'},
+    {detection_id:'DM005',centroid_lat:25.18,centroid_lon:49.42,flux_kg_hr:143,co2e_kg_hr:11440,confidence:0.82,epistemic_variance:0.10,attribution:{facility_name:'Ghawar East Field',operator:'Saudi Aramco',facility_type:'oil_wellpad',facility_id:'FAC-SA-001',distance_km:3.2},enforcement:{risk_level:'HIGH',notice_id:'NOV-DM005'},economics:{total_cost_inr:847000},source:'live'},
+    {detection_id:'DM006',centroid_lat:41.25,centroid_lon:83.90,flux_kg_hr:189,co2e_kg_hr:15120,confidence:0.85,epistemic_variance:0.09,attribution:{facility_name:'Tarim Basin LNG-9',operator:'CNPC',facility_type:'lng_terminal',facility_id:'FAC-CN-001',distance_km:1.8},enforcement:{risk_level:'HIGH',notice_id:'NOV-DM006'},economics:{total_cost_inr:1119000},source:'live'},
+    {detection_id:'DM007',centroid_lat:19.22,centroid_lon:72.78,flux_kg_hr:127,co2e_kg_hr:10160,confidence:0.84,epistemic_variance:0.09,attribution:{facility_name:'Mumbai Offshore BH-3',operator:'ONGC',facility_type:'oil_wellpad',facility_id:'FAC-IN-003',distance_km:2.3},enforcement:{risk_level:'HIGH',notice_id:'NOV-DM007'},economics:{total_cost_inr:752000},source:'live'},
+    {detection_id:'DM008',centroid_lat:28.64,centroid_lon:77.34,flux_kg_hr:118,co2e_kg_hr:9440,confidence:0.83,epistemic_variance:0.10,attribution:{facility_name:'Ghazipur Landfill',operator:'EDMC Delhi',facility_type:'landfill',facility_id:'FAC-IN-005',distance_km:0.3},enforcement:{risk_level:'HIGH',notice_id:'NOV-DM008'},economics:{total_cost_inr:699000},source:'live'},
+    // MEDIUM
+    {detection_id:'DM009',centroid_lat:22.08,centroid_lon:88.12,flux_kg_hr:76,co2e_kg_hr:6080,confidence:0.78,epistemic_variance:0.12,attribution:{facility_name:'Haldia Petrochem',operator:'HPCL',facility_type:'refinery',facility_id:'FAC-IN-001',distance_km:0.6},enforcement:{risk_level:'MEDIUM',notice_id:''},economics:{total_cost_inr:450000},source:'live'},
+    {detection_id:'DM010',centroid_lat:57.55,centroid_lon:2.45,flux_kg_hr:55,co2e_kg_hr:4400,confidence:0.72,epistemic_variance:0.14,attribution:{facility_name:'North Sea Platform',operator:'BritGas PLC',facility_type:'gas_compressor',facility_id:'FAC-EU-001',distance_km:4.1},enforcement:{risk_level:'MEDIUM',notice_id:''},economics:{total_cost_inr:325000},source:'live'},
+    {detection_id:'DM011',centroid_lat:-23.48,centroid_lon:148.25,flux_kg_hr:88,co2e_kg_hr:7040,confidence:0.80,epistemic_variance:0.11,attribution:{facility_name:'Bowen Basin Mine',operator:'Pacific Coal',facility_type:'coal_mine',facility_id:'FAC-AU-001',distance_km:1.1},enforcement:{risk_level:'MEDIUM',notice_id:''},economics:{total_cost_inr:521000},source:'live'},
+    {detection_id:'DM012',centroid_lat:51.52,centroid_lon:7.14,flux_kg_hr:44,co2e_kg_hr:3520,confidence:0.71,epistemic_variance:0.15,attribution:{facility_name:'Ruhr Valley Chem',operator:'RheinChem GmbH',facility_type:'refinery',facility_id:'FAC-DE-001',distance_km:0.9},enforcement:{risk_level:'MEDIUM',notice_id:''},economics:{total_cost_inr:261000},source:'live'},
+    {detection_id:'DM013',centroid_lat:9.95,centroid_lon:76.27,flux_kg_hr:62,co2e_kg_hr:4960,confidence:0.74,epistemic_variance:0.13,attribution:{facility_name:'Kochi WWT Plant',operator:'KSPCB',facility_type:'wastewater',facility_id:'FAC-IN-006',distance_km:0.2},enforcement:{risk_level:'MEDIUM',notice_id:''},economics:{total_cost_inr:367000},source:'live'},
+    {detection_id:'DM014',centroid_lat:-23.53,centroid_lon:-46.72,flux_kg_hr:74,co2e_kg_hr:5920,confidence:0.77,epistemic_variance:0.12,attribution:{facility_name:'Bandeirantes Landfill',operator:'PMSP Brazil',facility_type:'landfill',facility_id:'FAC-BR-001',distance_km:0.5},enforcement:{risk_level:'MEDIUM',notice_id:''},economics:{total_cost_inr:438000},source:'live'},
+    {detection_id:'DM015',centroid_lat:39.92,centroid_lon:116.39,flux_kg_hr:58,co2e_kg_hr:4640,confidence:0.73,epistemic_variance:0.14,attribution:{facility_name:'Beijing WWTP-7',operator:'Shougang Group',facility_type:'wastewater',facility_id:'FAC-CN-002',distance_km:0.7},enforcement:{risk_level:'MEDIUM',notice_id:''},economics:{total_cost_inr:343000},source:'live'},
+    // LOW — biogenic-rich sites (great for recovery)
+    {detection_id:'DM016',centroid_lat:22.30,centroid_lon:73.10,flux_kg_hr:31,co2e_kg_hr:2480,confidence:0.68,epistemic_variance:0.16,attribution:{facility_name:'Gujarat Gas Comp-7',operator:'GAIL India',facility_type:'gas_compressor',facility_id:'FAC-IN-002',distance_km:0.4},enforcement:{risk_level:'LOW',notice_id:''},economics:{total_cost_inr:184000},source:'live'},
+    {detection_id:'DM017',centroid_lat:18.52,centroid_lon:73.85,flux_kg_hr:28,co2e_kg_hr:2240,confidence:0.66,epistemic_variance:0.17,attribution:{facility_name:'Pune MSWM Site',operator:'PCMC',facility_type:'landfill',facility_id:'FAC-IN-004',distance_km:0.2},enforcement:{risk_level:'LOW',notice_id:''},economics:{total_cost_inr:166000},source:'live'},
+    {detection_id:'DM018',centroid_lat:19.99,centroid_lon:73.79,flux_kg_hr:22,co2e_kg_hr:1760,confidence:0.64,epistemic_variance:0.18,attribution:{facility_name:'Nashik Biogas Facility',operator:'NMC Energy',facility_type:'biogas_plant',facility_id:'FAC-IN-008',distance_km:0.1},enforcement:{risk_level:'LOW',notice_id:''},economics:{total_cost_inr:130000},source:'live'},
+    {detection_id:'DM019',centroid_lat:13.02,centroid_lon:80.22,flux_kg_hr:35,co2e_kg_hr:2800,confidence:0.70,epistemic_variance:0.15,attribution:{facility_name:'Chennai WWTP-3',operator:'CMWSSB',facility_type:'wastewater',facility_id:'FAC-IN-007',distance_km:0.3},enforcement:{risk_level:'LOW',notice_id:''},economics:{total_cost_inr:207000},source:'live'},
+    {detection_id:'DM020',centroid_lat:30.90,centroid_lon:75.85,flux_kg_hr:18,co2e_kg_hr:1440,confidence:0.62,epistemic_variance:0.19,attribution:{facility_name:'Ludhiana Biodigester',operator:'Punjab Agri',facility_type:'agricultural',facility_id:'FAC-IN-009',distance_km:0.1},enforcement:{risk_level:'LOW',notice_id:''},economics:{total_cost_inr:107000},source:'live'},
+    {detection_id:'DM021',centroid_lat:-29.87,centroid_lon:30.97,flux_kg_hr:29,co2e_kg_hr:2320,confidence:0.67,epistemic_variance:0.17,attribution:{facility_name:'Bisasar Rd WWTP',operator:'eThekwini',facility_type:'wastewater',facility_id:'FAC-ZA-001',distance_km:0.4},enforcement:{risk_level:'LOW',notice_id:''},economics:{total_cost_inr:172000},source:'live'},
+    {detection_id:'DM022',centroid_lat:40.58,centroid_lon:-74.18,flux_kg_hr:33,co2e_kg_hr:2640,confidence:0.69,epistemic_variance:0.16,attribution:{facility_name:'Fresh Kills Landfill',operator:'NYC Sanitation',facility_type:'landfill',facility_id:'FAC-US-002',distance_km:0.6},enforcement:{risk_level:'LOW',notice_id:''},economics:{total_cost_inr:195000},source:'live'},
+    {detection_id:'DM023',centroid_lat:48.14,centroid_lon:11.56,flux_kg_hr:16,co2e_kg_hr:1280,confidence:0.61,epistemic_variance:0.20,attribution:{facility_name:'Munich Biogas Plant',operator:'Stadtwerke München',facility_type:'biogas_plant',facility_id:'FAC-DE-002',distance_km:0.1},enforcement:{risk_level:'LOW',notice_id:''},economics:{total_cost_inr:95000},source:'live'},
+    {detection_id:'DM024',centroid_lat:28.60,centroid_lon:69.21,flux_kg_hr:37,co2e_kg_hr:2960,confidence:0.71,epistemic_variance:0.15,attribution:{facility_name:'Sui Gas Field G-4',operator:'SSGC Pakistan',facility_type:'gas_compressor',facility_id:'FAC-PK-001',distance_km:1.1},enforcement:{risk_level:'LOW',notice_id:''},economics:{total_cost_inr:219000},source:'live'},
+    {detection_id:'DM025',centroid_lat:14.68,centroid_lon:100.52,flux_kg_hr:24,co2e_kg_hr:1920,confidence:0.63,epistemic_variance:0.19,attribution:{facility_name:'Bangkok WWTP-2',operator:'Bangkok Metro',facility_type:'wastewater',facility_id:'',distance_km:0.3},enforcement:{risk_level:'LOW',notice_id:''},economics:{total_cost_inr:142000},source:'live'},
+    {detection_id:'DM026',centroid_lat:6.52,centroid_lon:3.37,flux_kg_hr:26,co2e_kg_hr:2080,confidence:0.65,epistemic_variance:0.18,attribution:{facility_name:'Lagos Olusosun Landfill',operator:'LAWMA',facility_type:'landfill',facility_id:'',distance_km:0.5},enforcement:{risk_level:'LOW',notice_id:''},economics:{total_cost_inr:154000},source:'live'},
+    {detection_id:'DM027',centroid_lat:55.75,centroid_lon:37.62,flux_kg_hr:20,co2e_kg_hr:1600,confidence:0.62,epistemic_variance:0.19,attribution:{facility_name:'Moscow Lyubertsy WWTP',operator:'Mosvodokanal',facility_type:'wastewater',facility_id:'',distance_km:0.4},enforcement:{risk_level:'LOW',notice_id:''},economics:{total_cost_inr:118000},source:'live'},
+    {detection_id:'DM028',centroid_lat:-33.87,centroid_lon:151.20,flux_kg_hr:15,co2e_kg_hr:1200,confidence:0.60,epistemic_variance:0.21,attribution:{facility_name:'Sydney Lucas Heights Landfill',operator:'ANSTO',facility_type:'landfill',facility_id:'',distance_km:0.8},enforcement:{risk_level:'LOW',notice_id:''},economics:{total_cost_inr:89000},source:'live'},
+  ];
+
+  const SCORECARDS=[
+    {facility_name:'Galkynysh Gas Field',operator:'Turkmengaz',facility_type:'gas_compressor',compliance_score:12,risk_level:'CRITICAL',flux_kg_hr:487,violations_12mo:14,confidence:94},
+    {facility_name:'Niger Delta P-12',operator:'Gulf Stream',facility_type:'oil_wellpad',compliance_score:18,risk_level:'CRITICAL',flux_kg_hr:312,violations_12mo:11,confidence:89},
+    {facility_name:'Orenburg Gas Plant',operator:'GazpromNeft',facility_type:'gas_compressor',compliance_score:25,risk_level:'CRITICAL',flux_kg_hr:267,violations_12mo:9,confidence:91},
+    {facility_name:'Ghazipur Landfill',operator:'EDMC Delhi',facility_type:'landfill',compliance_score:31,risk_level:'HIGH',flux_kg_hr:118,violations_12mo:7,confidence:83},
+    {facility_name:'Permian Basin WP-7',operator:'OilCorp Intl',facility_type:'oil_wellpad',compliance_score:41,risk_level:'HIGH',flux_kg_hr:198,violations_12mo:6,confidence:87},
+    {facility_name:'Tarim Basin LNG-9',operator:'CNPC',facility_type:'lng_terminal',compliance_score:48,risk_level:'HIGH',flux_kg_hr:189,violations_12mo:5,confidence:85},
+    {facility_name:'Mumbai Offshore BH-3',operator:'ONGC',facility_type:'oil_wellpad',compliance_score:55,risk_level:'HIGH',flux_kg_hr:127,violations_12mo:4,confidence:84},
+    {facility_name:'Ghawar East Field',operator:'Saudi Aramco',facility_type:'oil_wellpad',compliance_score:62,risk_level:'HIGH',flux_kg_hr:143,violations_12mo:3,confidence:82},
+    {facility_name:'Bowen Basin Mine',operator:'Pacific Coal',facility_type:'coal_mine',compliance_score:67,risk_level:'MEDIUM',flux_kg_hr:88,violations_12mo:2,confidence:80},
+    {facility_name:'Haldia Petrochem',operator:'HPCL',facility_type:'refinery',compliance_score:72,risk_level:'MEDIUM',flux_kg_hr:76,violations_12mo:2,confidence:78},
+    {facility_name:'Bandeirantes Landfill',operator:'PMSP Brazil',facility_type:'landfill',compliance_score:74,risk_level:'MEDIUM',flux_kg_hr:74,violations_12mo:2,confidence:77},
+    {facility_name:'Kochi WWT Plant',operator:'KSPCB',facility_type:'wastewater',compliance_score:78,risk_level:'MEDIUM',flux_kg_hr:62,violations_12mo:1,confidence:74},
+    {facility_name:'North Sea Platform',operator:'BritGas PLC',facility_type:'gas_compressor',compliance_score:79,risk_level:'MEDIUM',flux_kg_hr:55,violations_12mo:1,confidence:72},
+    {facility_name:'Ruhr Valley Chem',operator:'RheinChem GmbH',facility_type:'refinery',compliance_score:83,risk_level:'MEDIUM',flux_kg_hr:44,violations_12mo:1,confidence:71},
+    {facility_name:'Pune MSWM Site',operator:'PCMC',facility_type:'landfill',compliance_score:85,risk_level:'LOW',flux_kg_hr:28,violations_12mo:0,confidence:66},
+    {facility_name:'Chennai WWTP-3',operator:'CMWSSB',facility_type:'wastewater',compliance_score:87,risk_level:'LOW',flux_kg_hr:35,violations_12mo:0,confidence:70},
+    {facility_name:'Fresh Kills Landfill',operator:'NYC Sanitation',facility_type:'landfill',compliance_score:88,risk_level:'LOW',flux_kg_hr:33,violations_12mo:0,confidence:69},
+    {facility_name:'Gujarat Gas Comp-7',operator:'GAIL India',facility_type:'gas_compressor',compliance_score:91,risk_level:'LOW',flux_kg_hr:31,violations_12mo:0,confidence:68},
+    {facility_name:'Nashik Biogas Facility',operator:'NMC Energy',facility_type:'biogas_plant',compliance_score:93,risk_level:'LOW',flux_kg_hr:22,violations_12mo:0,confidence:64},
+    {facility_name:'Munich Biogas Plant',operator:'Stadtwerke München',facility_type:'biogas_plant',compliance_score:95,risk_level:'LOW',flux_kg_hr:16,violations_12mo:0,confidence:61},
+    {facility_name:'Ludhiana Biodigester',operator:'Punjab Agri',facility_type:'agricultural',compliance_score:97,risk_level:'LOW',flux_kg_hr:18,violations_12mo:0,confidence:62},
+  ];
+  S.detections=DEMO.map(normalise);
+  S.scorecard=SCORECARDS;
+  S.usingAPI=false;
+}
+
+// ── Map ─────────────────────────────────────────────────────────────────────
+function initMap(){
+  if(S.mapInitialised)return;
+  S.mapInitialised=true;
+  S.leafletMap=L.map('leaflet-map',{zoomControl:true,scrollWheelZoom:true,zoomAnimation:true,fadeAnimation:true}).setView([25,30],2);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',maxZoom:18,subdomains:'abcd'}).addTo(S.leafletMap);
+  S.leafletMap.zoomControl.setPosition('bottomright');
+}
+function renderMap(dets){
+  if(!S.mapInitialised)initMap();
+  S.mapMarkers.forEach(m=>m.remove());S.mapMarkers=[];
+  const totalFlux=dets.reduce((s,d)=>s+(d.flux_kg_hr||0),0);
+  const critCount=dets.filter(d=>riskOf(d)==='CRITICAL').length;
+  const ms=g('ms-count');if(ms)ms.textContent=dets.length;
+  const mc=g('ms-crit');if(mc)mc.textContent=critCount;
+  const mf=g('ms-flux');if(mf)mf.textContent=totalFlux.toFixed(0)+' kg/hr';
+  const msrc=g('ms-source');if(msrc)msrc.textContent=S.apiOnline?'🛰 LIVE':'🛰 SATELLITE';
+  dets.forEach(d=>{
+    if(!d.centroid_lat&&!d.centroid_lon)return;
+    const r=riskOf(d),c=RISK_COLOR[r]||'#888';
+    const flux=d.flux_kg_hr||10;
+    const radius=Math.max(5,Math.min(22,Math.sqrt(flux)*0.8));
+    const isSyn=d.source==='synthetic';
+    const marker=L.circleMarker([d.centroid_lat,d.centroid_lon],{radius,fillColor:c,fillOpacity:isSyn?0.55:0.80,color:isSyn?'#3b82f6':'white',weight:isSyn?1.5:2,opacity:1}).addTo(S.leafletMap);
+    const fn=attrOf(d,'facility_name','Unknown'),op=attrOf(d,'operator','?'),ft=attrOf(d,'facility_type','?').replace(/_/g,' '),riskBg=RISK_BG[r]||'rgba(0,0,0,0.04)';
+    marker.bindPopup(`<div style="font-family:'DM Sans',sans-serif;min-width:210px"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;padding-bottom:9px;border-bottom:1px solid #eee"><div><div style="font-weight:800;font-size:0.88rem;color:#0a0a09;line-height:1.2">${fn}${isSyn?'<span style="margin-left:5px;font-size:0.55rem;color:#3b82f6;font-weight:700;background:rgba(59,130,246,0.08);padding:1px 5px;border-radius:3px;border:1px solid rgba(59,130,246,0.2)">SYN</span>':''}</div><div style="font-size:0.6rem;color:#8a8a87;margin-top:2px">${op}</div></div><span style="font-size:0.52rem;font-weight:700;color:${c};background:${riskBg};border:1px solid ${c}33;padding:2px 7px;border-radius:12px;white-space:nowrap">${r}</span></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px"><div style="background:#f5f4f0;border-radius:6px;padding:7px 9px"><div style="font-size:0.42rem;color:#8a8a87;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:2px">Flux</div><div style="font-size:0.9rem;font-weight:800;color:${c}">${flux.toFixed(1)}<span style="font-size:0.55rem;font-weight:400;color:#8a8a87"> kg/hr</span></div></div><div style="background:#f5f4f0;border-radius:6px;padding:7px 9px"><div style="font-size:0.42rem;color:#8a8a87;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:2px">CO₂e</div><div style="font-size:0.9rem;font-weight:800;color:#0a0a09">${(d.co2e_kg_hr||flux*80).toFixed(0)}<span style="font-size:0.55rem;font-weight:400;color:#8a8a87"> kg/hr</span></div></div><div style="background:#f5f4f0;border-radius:6px;padding:7px 9px"><div style="font-size:0.42rem;color:#8a8a87;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:2px">Confidence</div><div style="font-size:0.9rem;font-weight:800;color:#15803d">${((d.confidence||0)*100).toFixed(1)}<span style="font-size:0.55rem;font-weight:400;color:#8a8a87">%</span></div></div><div style="background:#f5f4f0;border-radius:6px;padding:7px 9px"><div style="font-size:0.42rem;color:#8a8a87;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:2px">Type</div><div style="font-size:0.65rem;font-weight:600;color:#0a0a09;text-transform:capitalize">${ft}</div></div></div><div style="margin-top:7px;font-size:0.5rem;color:#8a8a87;font-family:'Space Mono',monospace">${(d.centroid_lat||0).toFixed(4)}°N, ${(d.centroid_lon||0).toFixed(4)}°E</div></div>`,{maxWidth:260});
+    S.mapMarkers.push(marker);
+  });
+}
+
+// ── API fetches ─────────────────────────────────────────────────────────────
+async function checkHealth(){
+  try{const r=await fetch(EP.health);S.apiOnline=r.ok;dotColor('dot-health',r.ok);}
+  catch{S.apiOnline=false;dotColor('dot-health',false);}
+  renderAPIStatus();
+}
+async function fetchDetections(){
+  try{
+    const r=await fetch(EP.detections);dotColor('dot-det',r.ok);
+    if(!r.ok)return;
+    const data=await r.json();
+    const raw=Array.isArray(data)?data:(data.detections||[]);
+    if(raw.length>0){S.detections=raw.map(normalise);S.usingAPI=true;}
+  }catch(e){console.warn('[ARGUS] fetchDetections:',e);dotColor('dot-det',false);}
+}
+async function fetchAlerts(){
+  if(!S.epAvail.alerts)return;
+  try{const r=await fetch(EP.alerts);if(!r.ok){S.epAvail.alerts=false;return;}const data=await r.json();const alerts=Array.isArray(data)?data:(data.alerts||[]);if(alerts.length){const ids=new Set(S.liveAlerts.map(a=>a.id||a.alert_id));alerts.forEach(a=>{if(!ids.has(a.id||a.alert_id))S.liveAlerts.unshift(a);});S.liveAlerts=S.liveAlerts.slice(0,100);}}
+  catch{S.epAvail.alerts=false;}
+}
+async function fetchScorecard(){
+  if(!S.epAvail.scorecard)return;
+  try{const r=await fetch(EP.scorecard);if(!r.ok){S.epAvail.scorecard=false;return;}const data=await r.json();const sc=Array.isArray(data)?data:(data.scorecard||[]);if(sc.length)S.scorecard=sc;}
+  catch{S.epAvail.scorecard=false;}
+}
+async function manualRefresh(){const overlay=g('loading-overlay');overlay.classList.remove('hidden');await doFetch();overlay.classList.add('hidden');}
+async function doFetch(){
+  const t0=Date.now();
+  await checkHealth();
+  if(S.apiOnline){await fetchDetections();await Promise.allSettled([fetchAlerts(),fetchScorecard()]);if(!S.wsConnected&&!S.sseConnected)tryWebSocket();}
+  S.timing.total=Date.now()-t0;renderAll();
+  const connStr=S.wsConnected?'🔴 WS':S.sseConnected?'📡 SSE':'🛰 SAT';
+  g('last-update').textContent=`${connStr} ${timeNow()} · ${S.detections.length} det`;
+}
+async function runPipeline(){
+  if(!S.apiOnline){alert('API offline — the pipeline requires a running server.\n\nStart it with:\nuvicorn src.api.main:app --port 8000 --reload');return;}
+  const region=g('region-select').value.split(',').map(Number);
+  try{const r=await fetch(EP.detect,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lat_min:region[0],lat_max:region[1],lon_min:region[2],lon_max:region[3]})});if(r.ok){const data=await r.json();const raw=data.detections||data.results||[];if(raw.length){S.detections=raw.map(normalise);S.usingAPI=true;renderAll();}}}
+  catch(e){console.warn('[ARGUS] Pipeline failed:',e);}
+}
+function tryWebSocket(){
+  if(S.ws&&S.ws.readyState<2)return;
+  try{const ws=new WebSocket(EP.ws);ws.onopen=()=>{S.wsConnected=true;S.ws=ws;dotColor('dot-ws',true);updateConnBadge();};ws.onmessage=ev=>{try{const msg=JSON.parse(ev.data);const raw=msg.detections||(Array.isArray(msg)?msg:null);if(raw&&raw.length>0){S.detections=raw.map(normalise);S.usingAPI=true;renderAll();g('last-update').textContent='🔴 WS '+timeNow();}}catch{}};ws.onerror=ws.onclose=()=>{S.wsConnected=false;S.ws=null;dotColor('dot-ws',false);updateConnBadge();setTimeout(trySSE,2000);};}catch{trySSE();}
+}
+function trySSE(){
+  if(S.sseConnected)return;
+  try{const es=new EventSource(EP.sse);es.onopen=()=>{S.sseConnected=true;S.sse=es;dotColor('dot-sse',true);updateConnBadge();};es.onmessage=ev=>{try{const msg=JSON.parse(ev.data);const raw=msg.detections||[];if(raw.length>0){S.detections=raw.map(normalise);S.usingAPI=true;renderAll();g('last-update').textContent='📡 SSE '+timeNow();}}catch{}};es.onerror=()=>{S.sseConnected=false;S.sse=null;es.close();dotColor('dot-sse',false);updateConnBadge();};}catch{dotColor('dot-sse',false);}
+}
+function updateConnBadge(){g('conn-mode').textContent=S.wsConnected?'🔴 WEBSOCKET':S.sseConnected?'📡 SSE STREAM':S.apiOnline?'⏱ POLL':'🛰 SATELLITE';}
+function renderAll(){
+  const synDets=S.synAlerts.filter(a=>!a.fp).map(a=>({...a,source:'synthetic'}));
+  const dets=[...S.detections,...(S.satOnline?[]:synDets)];
+  g('loading-overlay').classList.add('hidden');
+  if(!dets.length)return;
+  const totalFlux=dets.reduce((s,d)=>s+(d.flux_kg_hr||0),0);
+  const critCnt=dets.filter(d=>riskOf(d)==='CRITICAL').length;
+  const totalINR=dets.reduce((s,d)=>s+((d.economics||{}).total_cost_inr||0),0);
+  function setKPI(id,html,idx){const el=g(id);if(!el)return;el.innerHTML=html;const card=g('kpi-strip').children[idx];if(card){card.classList.remove('flashing');void card.offsetWidth;card.classList.add('flashing');}}
+  setKPI('k-count',dets.length,0);g('k-count-d').innerHTML=deltaArrow(dets.length,S.lastCount);
+  setKPI('k-crit',critCnt,1);g('k-crit-d').innerHTML=deltaArrow(critCnt,S.lastCrit);
+  setKPI('k-flux',fmt(totalFlux,0)+'<span class="kpi-unit">kg/hr</span>',2);g('k-flux-d').innerHTML=deltaArrow(totalFlux,S.lastFlux);
+  setKPI('k-econ','₹'+fmt(totalINR/1e7,1)+'<span class="kpi-unit">Cr/30d</span>',3);
+  setKPI('k-co2',fmt(totalFlux*80/1000,1)+'<span class="kpi-unit">t/hr</span>',4);
+  S.lastCount=dets.length;S.lastCrit=critCnt;S.lastFlux=totalFlux;
+  const t=[`🛰 TROPOMI +2.3 ppb XCH₄`,`ERA5 NNW 4.2 m/s`,`CRITICAL: ${attrOf(dets[0],'facility_name','?')} ${(dets[0]&&dets[0].flux_kg_hr||0).toFixed(0)} kg/hr`,`CO₂e ${(totalFlux*80/1000).toFixed(1)} t/hr`,`${dets.length} DETECTIONS · ${critCnt} CRITICAL`,`🌱 BIOGENIC RECOVERY: ${dets.filter(d=>['landfill','wastewater','biogas_plant','agricultural'].includes(attrOf(d,'facility_type',''))).length} ELIGIBLE SITES`].map(i=>`<span>${i}</span><span>│</span>`).join('');
+  g('ticker').innerHTML=t+t;
+  renderMap(dets);renderDetTable(dets);renderCompliance();updateEconomics(S.econDays);renderRecovery(dets);populateNOVSelect(dets);
+  if(document.querySelector('#panel-alerts.active'))renderAlerts();
+  renderSystem();updateSynUI();
+}
+function renderAPIStatus(){
+  const el=g('api-status');
+  if(S.apiOnline){el.style.cssText='background:rgba(21,128,61,0.10);border:1px solid rgba(21,128,61,0.22)';el.innerHTML=`<span class="dot" style="background:#16a34a"></span><span style="color:#4ade80;font-size:0.58rem">API ONLINE · ${timeNow()}</span>`;}
+  else{el.style.cssText='background:rgba(29,78,216,0.09);border:1px solid rgba(29,78,216,0.20)';el.innerHTML=`<span class="dot" style="background:#3b82f6"></span><span style="color:#60a5fa;font-size:0.58rem">SATELLITE FEED ACTIVE</span>`;}
+}
+function renderDetTable(dets){
+  g('det-table-body').innerHTML=dets.map(d=>`<tr><td style="font-family:'Space Mono',monospace;font-size:0.56rem;color:var(--mist)">DET-${String(d.detection_id||'?').substring(0,6).padStart(4,'0')}</td><td style="font-weight:600">${attrOf(d,'facility_name','—')}</td><td style="color:var(--mist)">${attrOf(d,'operator','—')}</td><td style="font-weight:700;color:var(--terra)">${(d.flux_kg_hr||0).toFixed(1)}</td><td>${(d.co2e_kg_hr||0).toFixed(0)}</td><td>${((d.confidence||0)*100).toFixed(1)}%</td><td>${pill(riskOf(d))}</td><td style="font-size:0.48rem;color:${d.source==='synthetic'?'#3b82f6':S.apiOnline?'#15803d':'#60a5fa'}">${d.source==='synthetic'?'🔵 SYN':S.apiOnline?'🛰 LIVE':'🛰 SAT'}</td><td style="color:var(--mist)">${(d.centroid_lat||0).toFixed(3)}</td><td style="color:var(--mist)">${(d.centroid_lon||0).toFixed(3)}</td></tr>`).join('');
+}
+function renderCompliance(){
+  const sc=S.scorecard;if(!sc.length)return;
+  destroy('comp-chart');S.charts['comp-chart']=new Chart(g('comp-chart').getContext('2d'),{type:'bar',data:{labels:sc.map(r=>r.operator.substring(0,16)),datasets:[{data:sc.map(r=>r.compliance_score),backgroundColor:sc.map(r=>RISK_COLOR[r.risk_level]+'cc'),borderRadius:4,borderSkipped:false}]},options:{indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{grid:{color:'rgba(10,10,9,0.05)'},ticks:{font:{size:10}}},y:{grid:{display:false},ticks:{font:{size:10}}}},animation:{duration:500}}});
+  destroy('risk-pie-chart');const rc={};sc.forEach(r=>{rc[r.risk_level]=(rc[r.risk_level]||0)+1;});
+  S.charts['risk-pie-chart']=new Chart(g('risk-pie-chart').getContext('2d'),{type:'doughnut',data:{labels:Object.keys(rc),datasets:[{data:Object.values(rc),backgroundColor:Object.keys(rc).map(r=>RISK_COLOR[r]+'cc'),borderColor:'#fff',borderWidth:3}]},options:{cutout:'65%',plugins:{legend:{position:'bottom',labels:{font:{size:10}}}},animation:{duration:500}}});
+  g('comp-cards').innerHTML=sc.map(r=>{const c=RISK_COLOR[r.risk_level],bd=RISK_BD[r.risk_level];return `<div class="comp-row" style="border-color:${bd};border-left-color:${c}"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px"><div><div style="font-weight:700">${r.facility_name}</div><div style="font-size:0.56rem;color:var(--mist)">${r.operator} · ${r.facility_type.replace(/_/g,' ')}</div></div><div style="text-align:right">${pill(r.risk_level)}<div style="font-size:0.5rem;color:var(--mist);margin-top:2px">${r.flux_kg_hr} kg/hr</div></div></div><div class="comp-bar-track"><div class="comp-bar-fill" style="width:${r.compliance_score}%;background:${c}"></div></div><div style="display:flex;justify-content:space-between;margin-top:4px;font-size:0.52rem;color:var(--mist)"><span>Score: <strong style="color:${c}">${r.compliance_score}/100</strong></span><span>Violations: <strong style="color:${c}">${r.violations_12mo}</strong></span><span>Conf: ${r.confidence}%</span></div></div>`;}).join('');
+}
+function updateEconomics(days){
+  S.econDays=parseInt(days);g('econ-days-label').textContent=days+' days';
+  const hrs=days*24;let totUSD=0,totGas=0,totCarb=0,totFine=0;
+  const rows=S.detections.map(d=>{const flux=d.flux_kg_hr||0,ch4t=flux*hrs/1000,co2e=ch4t*80;const gas=ch4t*0.0553*2.80,carb=co2e*15,fine=co2e*50,tot=gas+carb+fine;totUSD+=tot;totGas+=gas;totCarb+=carb;totFine+=fine;return {facility:attrOf(d,'facility_name','?'),flux,ch4t,co2e,gas,carb,fine,tot,risk:riskOf(d)};});
+  const totalCr=totUSD*83.5/1e7;
+  g('e-total').textContent='₹'+totalCr.toFixed(2)+' Cr';g('e-total-usd').textContent='$'+fmt(totUSD,0)+' USD';
+  g('e-progress').style.width=Math.min(100,totalCr/50*100).toFixed(1)+'%';g('e-bench').textContent=(totalCr/50*100).toFixed(0)+'% of ₹50 Cr benchmark';
+  g('e-gas').textContent='$'+fmt(totGas,0);g('e-gas-sub').textContent='₹'+fmt(totGas*83.5/1e5,0)+' Lakh';g('e-fine').textContent='$'+fmt(totFine,0);
+  destroy('econ-proj-chart');const dayArr=Array.from({length:91},(_,i)=>i),daily=totalCr/Math.max(days,1),proj=dayArr.map(d=>daily*d);
+  S.charts['econ-proj-chart']=new Chart(g('econ-proj-chart').getContext('2d'),{type:'line',data:{labels:dayArr,datasets:[{label:'Upper',data:proj.map(v=>v*1.15),fill:false,borderColor:'rgba(201,78,26,0.12)',borderWidth:0,pointRadius:0,tension:0.3},{label:'Lower',data:proj.map(v=>v*0.85),fill:'-1',backgroundColor:'rgba(201,78,26,0.06)',borderColor:'rgba(201,78,26,0.12)',borderWidth:0,pointRadius:0,tension:0.3},{label:'Projected',data:proj,fill:false,borderColor:'#c94e1a',borderWidth:2.5,pointRadius:0,tension:0.3}]},options:{plugins:{legend:{display:false}},scales:{x:{grid:{color:'rgba(10,10,9,0.05)'},title:{display:true,text:'Days',font:{size:10}}},y:{grid:{color:'rgba(10,10,9,0.05)'},title:{display:true,text:'₹ Crore',font:{size:10}}}},animation:{duration:250}}});
+  destroy('econ-stack-chart');const top8=[...rows].sort((a,b)=>b.tot-a.tot).slice(0,8);
+  S.charts['econ-stack-chart']=new Chart(g('econ-stack-chart').getContext('2d'),{type:'bar',data:{labels:top8.map(r=>r.facility.substring(0,18)),datasets:[{label:'Gas lost',data:top8.map(r=>r.gas),backgroundColor:'#c94e1acc',borderRadius:2,borderSkipped:false},{label:'Carbon',data:top8.map(r=>r.carb),backgroundColor:'#15803dcc',borderRadius:2,borderSkipped:false},{label:'Fine',data:top8.map(r=>r.fine),backgroundColor:'#b91c1ccc',borderRadius:2,borderSkipped:false}]},options:{indexAxis:'y',plugins:{legend:{position:'bottom',labels:{font:{size:10}}}},scales:{x:{stacked:true,grid:{color:'rgba(10,10,9,0.05)'},ticks:{font:{size:10}}},y:{stacked:true,grid:{display:false},ticks:{font:{size:10}}}},animation:{duration:250}}});
+  g('econ-table-body').innerHTML=rows.map(r=>`<tr><td style="font-weight:600">${r.facility}</td><td>${r.flux.toFixed(1)}</td><td>${r.ch4t.toFixed(1)}</td><td>${r.co2e.toFixed(0)}</td><td>$${fmt(r.gas,0)}</td><td>$${fmt(r.carb,0)}</td><td style="color:var(--crimson)">$${fmt(r.fine,0)}</td><td style="font-weight:700;color:var(--terra)">₹${fmt(r.tot*83.5/1e5,1)}L</td><td>${pill(r.risk)}</td></tr>`).join('');
+}
+
+// ── RECOVERY — fully rewritten ───────────────────────────────────────────────
+function classifySource(flux, ftype, evar){
+  const prior = BIO_PRIOR[ftype] || 0.35;
+  // Epistemic variance modifies confidence; high variance pushes toward mixed
+  const varPenalty = Math.min(evar / 0.20, 1) * 0.08;
+  const prob = Math.max(0.02, Math.min(0.97, prior - varPenalty));
+  let stype;
+  if(prob >= 0.70) stype = 'BIOGENIC';
+  else if(prob <= 0.30) stype = 'THERMOGENIC';
+  else stype = 'MIXED';
+  // δ¹³C isotopic signature proxy: biogenic ~-70‰, thermogenic ~-30‰
+  const d13c = (-70 + (1 - prob) * 40).toFixed(1);
+  return { prob, stype, d13c };
+}
+
+function calcRecovery(flux, prob, ftype){
+  // Only biogenic fraction is recoverable as biogas
+  const recoverableFraction = (ftype === 'biogas_plant') ? 0.85 : 
+                              (ftype === 'landfill') ? 0.60 :
+                              (ftype === 'wastewater') ? 0.70 :
+                              (ftype === 'agricultural') ? 0.75 : prob;
+  const ch4RecoverableKgHr = flux * prob * recoverableFraction;
+  // 1 kg CH₄ = ~13.9 kWh (LHV); generator efficiency 35%
+  const kw = ch4RecoverableKgHr * 13.9 * 0.35;
+  // Annual revenue: electricity sale @ ₹7/kWh minus O&M ₹1.5/kWh
+  const annualKwh = kw * 8760;
+  const revINR = annualKwh * (7 - 1.5);
+  // Homes powered: average Indian household 1,200 kWh/yr
+  const homes = Math.round(annualKwh / 1200);
+  // CO2 offset: avoided emissions from grid electricity @ 0.82 kg CO2e/kWh
+  const co2OffsetTyr = (annualKwh * 0.82) / 1000;
+  // Capital cost estimate: ₹6 Cr/MW
+  const capexCr = (kw / 1000) * 6;
+  // Payback years
+  const paybackYrs = revINR > 0 ? (capexCr * 1e7 / revINR).toFixed(1) : '—';
+  return { kw, annualKwh, revINR, homes, co2OffsetTyr, capexCr, paybackYrs };
+}
+
+function renderRecovery(dets){
+  const BIO_TYPES = ['landfill','wastewater','biogas_plant','agricultural'];
+  
+  const clf = dets.map(d => {
+    const ftype = attrOf(d, 'facility_type', 'unknown');
+    const { prob, stype, d13c } = classifySource(d.flux_kg_hr || 0, ftype, d.epistemic_variance || 0.10);
+    const rec = calcRecovery(d.flux_kg_hr || 0, prob, ftype);
+    return {
+      name: attrOf(d, 'facility_name', '?'),
+      op: attrOf(d, 'operator', '?'),
+      flux: d.flux_kg_hr || 0,
+      risk: riskOf(d),
+      ftype,
+      prob,
+      stype,
+      d13c,
+      isBioType: BIO_TYPES.includes(ftype),
+      ...rec
+    };
+  });
+
+  // Summary counts
+  const nBio = clf.filter(c => c.stype === 'BIOGENIC').length;
+  const nTherm = clf.filter(c => c.stype === 'THERMOGENIC').length;
+  const nMix = clf.filter(c => c.stype === 'MIXED').length;
+  const eligibleSites = clf.filter(c => c.stype !== 'THERMOGENIC' && c.kw > 0);
+  const totKW = eligibleSites.reduce((s, c) => s + c.kw, 0);
+  const totRevCr = eligibleSites.reduce((s, c) => s + c.revINR, 0) / 1e7;
+  const totCO2 = eligibleSites.reduce((s, c) => s + c.co2OffsetTyr, 0);
+  const totHomes = eligibleSites.reduce((s, c) => s + c.homes, 0);
+
+  // KPI strip
+  g('recovery-kpis').innerHTML = [
+    ['🌱 Biogenic Sites', nBio, '', '#15803d'],
+    ['⚡ Total Power', totKW.toFixed(0), 'kW', '#c94e1a'],
+    ['₹ Annual Revenue', '₹'+totRevCr.toFixed(2), 'Cr/yr', '#15803d'],
+    ['🏠 Homes Powered', totHomes.toLocaleString(), '', '#1d4ed8'],
+  ].map(([l,v,u,c]) => `<div class="card"><div class="kpi-label">${l}</div><div class="kpi-value" style="color:${c};font-size:1.3rem">${v}<span class="kpi-unit">${u}</span></div></div>`).join('');
+
+  // Pie chart
+  destroy('bio-pie-chart');
+  S.charts['bio-pie-chart'] = new Chart(g('bio-pie-chart').getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Biogenic', 'Thermogenic', 'Mixed'],
+      datasets: [{
+        data: [nBio, nTherm, nMix],
+        backgroundColor: ['#15803dcc', '#b91c1ccc', '#d97706cc'],
+        borderColor: '#fff', borderWidth: 3
+      }]
+    },
+    options: {
+      cutout: '65%',
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 11 }, padding: 14 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.label}: ${ctx.parsed} sites`
+          }
+        }
+      },
+      animation: { duration: 600 }
+    }
+  });
+
+  // Bar chart — recovery potential
+  const barList = [...clf].filter(c => c.kw > 0.5).sort((a, b) => b.kw - a.kw).slice(0, 10);
+  destroy('bio-bar-chart');
+  S.charts['bio-bar-chart'] = new Chart(g('bio-bar-chart').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: barList.map(r => r.name.substring(0, 20)),
+      datasets: [{
+        label: 'Recovery kW',
+        data: barList.map(r => r.kw.toFixed(1)),
+        backgroundColor: barList.map(r => r.stype === 'BIOGENIC' ? '#15803dcc' : '#d97706cc'),
+        borderRadius: 5, borderSkipped: false
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: 'rgba(10,10,9,0.05)' }, ticks: { font: { size: 10 } }, title: { display: true, text: 'Recoverable Power (kW)', font: { size: 10 } } },
+        y: { grid: { display: false }, ticks: { font: { size: 10 } } }
+      },
+      animation: { duration: 500 }
+    }
+  });
+
+  // Revenue chart
+  const revList = [...eligibleSites].sort((a, b) => b.revINR - a.revINR).slice(0, 10);
+  destroy('bio-rev-chart');
+  S.charts['bio-rev-chart'] = new Chart(g('bio-rev-chart').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: revList.map(r => r.name.substring(0, 22)),
+      datasets: [
+        { label: 'Revenue (₹L/yr)', data: revList.map(r => (r.revINR / 1e5).toFixed(1)), backgroundColor: '#15803dcc', borderRadius: 5, borderSkipped: false },
+        { label: 'Capex (₹L)', data: revList.map(r => (r.capexCr * 100).toFixed(1)), backgroundColor: '#3b82f6aa', borderRadius: 5, borderSkipped: false },
+      ]
+    },
+    options: {
+      plugins: { legend: { position: 'bottom', labels: { font: { size: 10 } } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 9 } } },
+        y: { grid: { color: 'rgba(10,10,9,0.05)' }, ticks: { font: { size: 10 } }, title: { display: true, text: '₹ Lakh', font: { size: 10 } } }
+      },
+      animation: { duration: 500 }
+    }
+  });
+
+  // Per-site cards
+  const sorted = [...clf].sort((a, b) => {
+    // Biogenic first, then by kW
+    if(a.stype !== b.stype){
+      const order = { BIOGENIC: 0, MIXED: 1, THERMOGENIC: 2 };
+      return order[a.stype] - order[b.stype];
+    }
+    return b.kw - a.kw;
+  });
+
+  const STYPE_COLOR = { BIOGENIC: '#15803d', MIXED: '#d97706', THERMOGENIC: '#b91c1c' };
+  const STYPE_BG = { BIOGENIC: 'rgba(21,128,61,0.07)', MIXED: 'rgba(217,119,6,0.07)', THERMOGENIC: 'rgba(185,28,28,0.07)' };
+  const STYPE_BD = { BIOGENIC: 'rgba(21,128,61,0.22)', MIXED: 'rgba(217,119,6,0.22)', THERMOGENIC: 'rgba(185,28,28,0.22)' };
+
+  g('recovery-cards').innerHTML = sorted.map(r => {
+    const sc = STYPE_COLOR[r.stype];
+    const sbg = STYPE_BG[r.stype];
+    const sbd = STYPE_BD[r.stype];
+    const ftLabel = r.ftype.replace(/_/g, ' ');
+
+    const recStats = r.stype !== 'THERMOGENIC' && r.kw > 0.1 ? `
+      <div class="rec-grid">
+        <div class="rec-stat"><div class="rec-stat-label">⚡ Power</div><div class="rec-stat-value" style="color:#c94e1a">${r.kw.toFixed(1)}<span style="font-size:0.6rem;font-weight:400;color:var(--mist)"> kW</span></div></div>
+        <div class="rec-stat"><div class="rec-stat-label">₹ Rev/yr</div><div class="rec-stat-value" style="color:#15803d">₹${(r.revINR/1e5).toFixed(1)}<span style="font-size:0.6rem;font-weight:400;color:var(--mist)">L</span></div></div>
+        <div class="rec-stat"><div class="rec-stat-label">🏠 Homes</div><div class="rec-stat-value" style="color:#1d4ed8">${r.homes.toLocaleString()}</div></div>
+        <div class="rec-stat"><div class="rec-stat-label">🌍 CO₂ Off.</div><div class="rec-stat-value" style="color:#15803d">${r.co2OffsetTyr.toFixed(0)}<span style="font-size:0.6rem;font-weight:400;color:var(--mist)"> t/yr</span></div></div>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <div style="font-size:0.52rem;color:var(--mist)">Capex: <strong style="color:var(--ink)">₹${(r.capexCr).toFixed(2)} Cr</strong></div>
+        <div style="font-size:0.52rem;color:var(--mist)">Payback: <strong style="color:#1d4ed8">${r.paybackYrs} yrs</strong></div>
+        <div style="font-size:0.52rem;color:var(--mist)">Biogenic prob: <strong style="color:${sc}">${(r.prob*100).toFixed(0)}%</strong></div>
+        <div style="font-size:0.52rem;color:var(--mist)">δ¹³C: <strong style="color:var(--slate)">${r.d13c}‰</strong></div>
+      </div>
+    ` : `
+      <div style="margin-top:8px;padding:8px 12px;border-radius:7px;background:rgba(185,28,28,0.05);border:1px solid rgba(185,28,28,0.14);font-size:0.58rem;color:var(--slate)">
+        <strong>Thermogenic source</strong> — enforcement & repair pathway. No biogas recovery viable.
+        <div style="margin-top:4px">δ¹³C proxy: <strong>${r.d13c}‰</strong> · Biogenic prob: <strong>${(r.prob*100).toFixed(0)}%</strong></div>
+      </div>
+    `;
+
+    return `<div class="rec-card" style="border-color:${sbd};border-left-color:${sc}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+        <div>
+          <div style="font-weight:700;font-size:0.85rem">${r.name}</div>
+          <div style="font-size:0.56rem;color:var(--mist);margin-top:2px">${r.op} · <span style="text-transform:capitalize">${ftLabel}</span> · ${r.flux.toFixed(1)} kg/hr</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+          <span class="bio-badge" style="color:${sc};background:${sbg};border-color:${sbd}">🌱 ${r.stype}</span>
+          ${pill(r.risk)}
+        </div>
+      </div>
+      ${recStats}
+    </div>`;
+  }).join('');
+}
+
+function populateNOVSelect(dets){
+  const sel=g('nov-select'),cur=sel.value;
+  const novDets=dets.filter(d=>(d.flux_kg_hr||0)>=100);
+  sel.innerHTML=novDets.map((d,i)=>`<option value="${i}">DET-${String(d.detection_id||i).substring(0,6).padStart(4,'0')} · ${attrOf(d,'facility_name','?')} · ${(d.flux_kg_hr||0).toFixed(0)} kg/hr · ${riskOf(d)}</option>`).join('');
+  if(cur)sel.value=cur;renderNOV();
+}
+function renderNOV(){
+  const sel=g('nov-select');
+  const allDets=[...S.detections,...S.synAlerts.filter(a=>!a.fp).map(a=>({...a,source:'synthetic'}))];
+  const novDets=allDets.filter(d=>(d.flux_kg_hr||0)>=100);
+  const d=novDets[parseInt(sel.value||0)];
+  if(!d){g('nov-content').innerHTML='<div style="text-align:center;color:var(--mist);padding:40px;font-size:0.72rem">No detections ≥100 kg/hr available</div>';return;}
+  const flux=d.flux_kg_hr||0,r=riskOf(d),c=RISK_COLOR[r],bd=RISK_BD[r];
+  const co2eT=flux*30*24*80/1000,fineU=Math.round(co2eT*50),fineI=Math.round(fineU*83.5);
+  const nid=(d.enforcement||{}).notice_id||`NOV-ARGUS-${String(d.detection_id||0).substring(0,6).padStart(4,'0')}`;
+  g('nov-content').innerHTML=`<div class="grid-4" style="margin-bottom:14px">${[['Notice ID',nid.split('-').pop(),'','#c94e1a'],['Emission Rate',flux.toFixed(1),'kg/hr','#b91c1c'],['Statutory Fine','$'+fmt(fineU,0),'','#d97706'],['INR Equiv','₹'+(fineI/1e5).toFixed(1)+'L','','#15803d']].map(([l,v,u,c2])=>`<div class="card"><div class="kpi-label">${l}</div><div class="kpi-value" style="color:${c2};font-size:1.2rem">${v}<span class="kpi-unit">${u}</span></div></div>`).join('')}</div><div class="nov-card" style="border-color:${bd};border-top-color:${c}"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--rule)"><div><div style="font-size:1.5rem;font-weight:900;margin-bottom:5px">Notice of Violation</div><div style="font-size:0.58rem;color:var(--mist)">Ref: ${nid} · ${new Date().toISOString().slice(0,10)} · CPCB / MoEF&CC</div></div>${pill(r)}</div><div style="margin-bottom:12px"><div style="font-family:'Space Mono',monospace;font-size:0.4rem;text-transform:uppercase;letter-spacing:0.14em;color:var(--mist);font-weight:700;margin-bottom:3px">Addressee</div><div style="font-size:0.95rem;font-weight:700">${attrOf(d,'operator','Unknown')}</div><div style="font-size:0.62rem;color:var(--mist);margin-top:2px">Re: ${attrOf(d,'facility_name','?')}</div></div><div class="nov-grid"><div class="nov-section"><div class="nov-section-title">Detection Parameters</div><div style="font-size:0.63rem;color:var(--slate);line-height:2.1">Flux: <strong style="color:#c94e1a">${flux.toFixed(1)} kg CH₄/hr</strong><br>CO₂e: <strong>${(flux*80).toFixed(0)} kg/hr</strong><br>Confidence: <strong style="color:#15803d">${((d.confidence||0)*100).toFixed(1)}%</strong></div></div><div class="nov-section"><div class="nov-section-title">Financial Liability (30d)</div><div style="font-size:0.63rem;color:var(--slate);line-height:2.1">Gas lost: <strong>$${fmt(Math.round(flux*720*0.0553*2.8/1000))}</strong><br>Carbon cost: <strong>$${fmt(Math.round(co2eT*15))}</strong><br>Regulatory fine: <strong style="color:#b91c1c">$${fmt(fineU)}</strong></div></div></div><div class="nov-section" style="margin-bottom:12px"><div class="nov-section-title">Required Corrective Actions</div>${[['72 hrs','Cease or curtail detected emission source immediately'],['7 days','Submit Root Cause Analysis to CPCB regional office'],['30 days','Implement permanent remediation measures'],['60 days','Deploy continuous monitoring — CPCB PRISM integration']].map(([t,a])=>`<div class="action-row"><div class="action-dot" style="background:${c}"></div><span class="action-time" style="color:${c}">${t}</span><span>${a}</span></div>`).join('')}</div><div style="font-size:0.44rem;color:rgba(10,10,9,0.22);text-align:center;font-family:'Space Mono',monospace">Environment Protection Act 1986 · Air Act 1981 · India NDC 2021 · ARGUS-AUTO-GEN</div></div>`;
+}
+
+// ── SYNTHETIC FEED ───────────────────────────────────────────────────────────
+const FLUX_RANGES={gas_compressor:[200,500],oil_wellpad:[80,400],lng_terminal:[150,350],refinery:[100,300],coal_mine:[40,150],pipeline:[10,80],landfill:[15,90],wastewater:[10,70],biogas_plant:[8,50],agricultural:[5,45]};
+function setSatOnline(online){
+  S.satOnline=online;const banner=g('sat-banner');
+  if(online){banner.style.cssText='padding:11px 14px;border-radius:9px;margin-bottom:16px;display:flex;align-items:center;gap:11px;font-size:0.63rem;font-weight:600;background:rgba(21,128,61,0.07);border:1.5px solid rgba(21,128,61,0.20);color:#15803d;transition:all 0.4s';g('sat-banner-icon').textContent='🛰️';g('sat-banner-text').textContent='Satellite feed: ONLINE — real data active';g('sat-online-btn').style.background='var(--terra)';g('sat-offline-btn').style.background='rgba(255,255,255,0.05)';g('sat-mode-label').textContent='MODE: LIVE';}
+  else{banner.style.cssText='padding:11px 14px;border-radius:9px;margin-bottom:16px;display:flex;align-items:center;gap:11px;font-size:0.63rem;font-weight:600;background:rgba(185,28,28,0.07);border:1.5px solid rgba(185,28,28,0.22);color:#b91c1c;transition:all 0.4s';g('sat-banner-icon').textContent='📡';g('sat-banner-text').textContent='⚠ Satellite OFFLINE — Synthetic Data Engine activated';g('sat-online-btn').style.background='rgba(255,255,255,0.05)';g('sat-offline-btn').style.background='var(--terra)';g('sat-mode-label').textContent='MODE: OFFLINE';}
+}
+function wienerDenoise(flux,sigma){if(sigma<=0)return {denoisedFlux:flux,rawSNR:Infinity,denoisedSNR:Infinity};const noise=randG(0,sigma*flux*0.01);const noisyFlux=Math.max(1,flux+noise);const signalPow=flux*flux,noisePow=noise*noise+1e-6;const rawSNR=10*Math.log10(signalPow/noisePow);const gain=signalPow/(signalPow+noisePow);const denoisedFlux=flux+noise*gain;const residual=Math.pow(denoisedFlux-flux,2)+1e-6;const denoisedSNR=10*Math.log10(signalPow/residual);return {denoisedFlux:Math.max(1,denoisedFlux),rawSNR,denoisedSNR,noise};}
+function fpFilterAgent(alert){const fac=FACILITY_DB.find(f=>f.id===alert.facility_id);if(!fac)return {fp:true,reason:'No matching facility in DB'};if(alert.confidence<0.45)return {fp:true,reason:`Conf ${alert.confidence.toFixed(2)} < 0.45`};if(alert.epistemic_variance>0.22)return {fp:true,reason:`σ²=${alert.epistemic_variance.toFixed(3)} > 0.22`};if(alert.flux_kg_hr<fac.permit*0.80&&alert.risk==='LOW')return {fp:true,reason:`Within permit (${fac.permit} kg/hr)`};if(S.noiseSigma>0&&alert.denoisedSNR<8)return {fp:true,reason:`SNR ${alert.denoisedSNR.toFixed(1)} dB < 8 dB`};return {fp:false,reason:''};}
+function generateSyntheticAlerts(){
+  const n=S.synBatchSize;g('gen-status').textContent='Generating…';g('fp-status').textContent='Processing…';
+  const newAlerts=[];
+  for(let i=0;i<n;i++){const fac=FACILITY_DB[Math.floor(Math.random()*FACILITY_DB.length)];const [lo,hi]=FLUX_RANGES[fac.type]||[50,200];const trueFlux=rand(lo,hi);const {denoisedFlux,rawSNR,denoisedSNR}=wienerDenoise(trueFlux,S.noiseSigma);const flux=denoisedFlux;const conf=Math.min(0.99,Math.max(0.25,randG(0.72,0.12)));const evar=Math.max(0.01,0.25-conf*0.18+rand(0,0.08));const windU=randG(2.0,4.5),windV=randG(-0.5,4.0);const windSpeed=Math.sqrt(windU*windU+windV*windV);const windDir=Math.round((Math.atan2(windU,windV)*180/Math.PI+360)%360);const lat=fac.lat+randG(0,0.3),lon=fac.lon+randG(0,0.3);const risk=fluxToRisk(flux);const ch4t=flux*720/1000,co2e=ch4t*80;const alert={id:`SYN-${Date.now().toString(36).toUpperCase()}-${i}`,facility_id:fac.id,facility_name:fac.name,operator:fac.operator,facility_type:fac.type,centroid_lat:parseFloat(lat.toFixed(4)),centroid_lon:parseFloat(lon.toFixed(4)),flux_kg_hr:parseFloat(flux.toFixed(2)),co2e_kg_hr:parseFloat((flux*80).toFixed(1)),confidence:parseFloat(conf.toFixed(3)),epistemic_variance:parseFloat(evar.toFixed(3)),wind_u:parseFloat(windU.toFixed(2)),wind_v:parseFloat(windV.toFixed(2)),wind_speed:parseFloat(windSpeed.toFixed(2)),wind_dir:windDir,risk,time:timeNow(),rawSNR:isFinite(rawSNR)?parseFloat(rawSNR.toFixed(1)):99,denoisedSNR:isFinite(denoisedSNR)?parseFloat(denoisedSNR.toFixed(1)):99,denoised:S.noiseSigma>0,source:'synthetic',attribution:{facility_name:fac.name,operator:fac.operator,facility_type:fac.type,facility_id:fac.id,distance_km:parseFloat(rand(0.5,8).toFixed(1))},enforcement:{risk_level:risk,notice_id:''},economics:{total_cost_inr:Math.round((flux*720*0.0553*2.8/1000+co2e*65)*83.5)}};const {fp,reason}=fpFilterAgent(alert);alert.fp=fp;alert.fp_reason=reason;newAlerts.push(alert);if(S.noiseSigma>0){S.denoiseLog.unshift({...alert});S.denoiseLog=S.denoiseLog.slice(0,30);}}
+  S.synAlerts=[...newAlerts,...S.synAlerts].slice(0,200);S.synGenerated+=n;S.synConfirmed=S.synAlerts.filter(a=>!a.fp).length;S.synFP=S.synAlerts.filter(a=>a.fp).length;
+  g('gen-status').textContent=`Generated ${S.synGenerated} total`;g('fp-status').textContent=`Precision: ${(S.synConfirmed/Math.max(S.synAlerts.length,1)*100).toFixed(0)}%`;
+  updateSynUI();updateDenoiseLog();renderAll();
+}
+function generateAlerts(){const old=S.synBatchSize;S.synBatchSize=parseInt(g('n-gen-input').value)||10;generateSyntheticAlerts();S.synBatchSize=old;renderAlerts();}
+function clearSynAlerts(){S.synAlerts=[];S.synGenerated=0;S.synConfirmed=0;S.synFP=0;S.ribs=[];S.denoiseLog=[];updateSynUI();renderAll();}
+function clearAlerts(){clearSynAlerts();S.liveAlerts=[];}
+function updateSynUI(){
+  g('gen-count').textContent=S.synGenerated;g('gen-confirmed').textContent=S.synConfirmed;g('gen-fp').textContent=S.synFP;
+  const prec=S.synAlerts.length?S.synConfirmed/S.synAlerts.length:0;g('fp-precision-bar').style.width=(prec*100).toFixed(0)+'%';g('fp-precision-val').textContent=S.synAlerts.length?(prec*100).toFixed(1)+'%':'—';
+  g('stream-status').textContent=`${S.synAlerts.length} ALERTS · ${S.synFP} FP FILTERED`;
+  const feed=g('syn-alert-feed');
+  if(!S.synAlerts.length){feed.innerHTML='<div style="text-align:center;color:var(--mist);padding:28px;font-size:0.7rem">No synthetic alerts yet — click Generate Alerts</div>';return;}
+  feed.innerHTML=S.synAlerts.slice(0,40).map((a,idx)=>{const c=RISK_COLOR[a.risk]||'#888',bd=RISK_BD[a.risk]||'rgba(0,0,0,0.08)';if(a.fp)return `<div class="syn-alert" style="border-color:rgba(10,10,9,0.10);border-left-color:#666;animation-delay:${idx*0.03}s"><div style="display:flex;justify-content:space-between"><div><div style="font-family:'Space Mono',monospace;font-size:0.46rem;color:var(--mist)">${a.time} · ${a.id}</div><div style="font-weight:600;color:var(--mist)">${a.facility_name}</div></div><span style="font-family:'Space Mono',monospace;font-size:0.48rem;color:var(--mist);border:1px solid rgba(10,10,9,0.12);padding:2px 7px;border-radius:4px">FP: ${a.fp_reason}</span></div></div>`;return `<div class="syn-alert" style="border-color:${bd};border-left-color:${c};animation-delay:${idx*0.03}s"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div style="font-family:'Space Mono',monospace;font-size:0.46rem;color:var(--mist)">${a.time} · ${a.id}</div><div style="font-weight:700;font-size:0.82rem;color:${c};margin:2px 0">${a.facility_name}</div><div style="font-size:0.56rem;color:var(--mist)">${a.operator} · ${a.wind_speed} m/s @ ${a.wind_dir}°</div></div><div style="text-align:right">${pill(a.risk)}</div></div><div class="alert-grid" style="margin-top:7px"><div class="alert-stat"><div class="alert-stat-label">Flux</div><div class="alert-stat-value" style="color:#c94e1a">${a.flux_kg_hr.toFixed(1)}</div></div><div class="alert-stat"><div class="alert-stat-label">Confidence</div><div class="alert-stat-value" style="color:#15803d">${(a.confidence*100).toFixed(1)}%</div></div><div class="alert-stat"><div class="alert-stat-label">σ²</div><div class="alert-stat-value" style="color:#d97706">${a.epistemic_variance.toFixed(3)}</div></div></div></div>`;}).join('');
+}
+function draftBriefs(){
+  const confirmed=S.synAlerts.filter(a=>!a.fp).sort((a,b)=>b.flux_kg_hr-a.flux_kg_hr).slice(0,5);
+  if(!confirmed.length){g('brief-status').textContent='No confirmed alerts';return;}
+  S.ribs=confirmed.map((a,i)=>{const flux=a.flux_kg_hr,co2eT=flux*30*24*80/1000,fineUSD=Math.round(co2eT*50);return {rank:i+1,id:a.id,facility:a.facility_name,operator:a.operator,type:a.facility_type,lat:a.centroid_lat,lon:a.centroid_lon,flux,conf:a.confidence,risk:a.risk,wind:`${a.wind_speed} m/s @ ${a.wind_dir}°`,ch4t:(flux*720/1000).toFixed(1),co2eT:co2eT.toFixed(0),fineUSD,fineINR:Math.round(fineUSD*83.5),noticeid:`RIB-ARGUS-${new Date().toISOString().slice(0,10)}-${String(i+1).padStart(3,'0')}`,denoised:a.denoised,rawSNR:a.rawSNR,denoisedSNR:a.denoisedSNR,summary:`Satellite-derived${a.denoised?' (Wiener-denoised)':''} intelligence identified a ${a.risk.toLowerCase()}-priority methane super-emitter at ${a.facility_name} (${a.operator}). Flux ${flux.toFixed(1)} kg CH₄/hr ${flux>=100?'exceeds':'approaches'} CPCB threshold. Wind ${a.wind_speed} m/s @ ${a.wind_dir}° indicates downwind dispersal risk.`};});
+  g('rib-cards').innerHTML=S.ribs.map((r,i)=>{const c=RISK_COLOR[r.risk]||'#888';return `<div class="brief-card" style="animation-delay:${i*0.07}s"><div style="display:flex;align-items:flex-start;gap:11px;margin-bottom:10px"><div class="brief-rank">${r.rank}</div><div style="flex:1"><div style="font-weight:700;font-size:0.82rem">${r.facility}</div><div style="font-family:'Space Mono',monospace;font-size:0.46rem;color:var(--mist)">${r.operator} · ${r.noticeid}</div></div><div>${pill(r.risk)}<div style="font-family:'Space Mono',monospace;font-size:0.48rem;color:var(--mist);text-align:right;margin-top:3px">${r.flux.toFixed(0)} kg/hr</div></div></div><div style="font-size:0.63rem;color:var(--slate);background:var(--snow);padding:9px 11px;border-radius:6px;margin-bottom:9px;line-height:1.6">${r.summary}</div><button onclick="openRIB(${i})" style="width:100%;padding:8px;background:rgba(59,130,246,0.07);border:1.5px solid rgba(59,130,246,0.22);color:#3b82f6;border-radius:6px;cursor:pointer;font-size:0.63rem;font-weight:600;transition:all 0.2s" onmouseover="this.style.background='rgba(59,130,246,0.13)'" onmouseout="this.style.background='rgba(59,130,246,0.07)'">📋 View Full Regulatory Intervention Brief</button></div>`;}).join('');
+  g('brief-status').textContent=`${S.ribs.length} briefs drafted`;g('rib-section').style.display='block';
+}
+function openRIB(idx){const r=S.ribs[idx];if(!r)return;const c=RISK_COLOR[r.risk]||'#888';g('rib-content').innerHTML=`<div style="border-top:4px solid ${c};padding-top:18px"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px"><div><div style="font-size:1.2rem;font-weight:900">Regulatory Intervention Brief</div><div style="font-family:'Space Mono',monospace;font-size:0.5rem;color:var(--mist);margin-top:3px">Ref: ${r.noticeid} · ${new Date().toISOString().slice(0,10)} · CPCB</div></div>${pill(r.risk)}</div><div style="background:var(--snow);border-radius:8px;padding:12px;margin-bottom:12px"><div style="font-family:'Space Mono',monospace;font-size:0.4rem;text-transform:uppercase;letter-spacing:0.14em;color:var(--mist);font-weight:700;margin-bottom:7px">Executive Summary</div><div style="font-size:0.7rem;color:var(--slate);line-height:1.7">${r.summary}</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px"><div style="background:var(--snow);border-radius:8px;padding:12px"><div style="font-family:'Space Mono',monospace;font-size:0.4rem;text-transform:uppercase;letter-spacing:0.14em;color:var(--mist);font-weight:700;margin-bottom:8px">Detection Parameters</div><div style="font-size:0.63rem;color:var(--slate);line-height:2.1">Facility: <strong>${r.facility}</strong><br>Operator: <strong>${r.operator}</strong><br>Flux: <strong style="color:#c94e1a">${r.flux.toFixed(1)} kg CH₄/hr</strong><br>Confidence: <strong style="color:#15803d">${(r.conf*100).toFixed(1)}%</strong><br>Wind: <strong>${r.wind}</strong></div></div><div style="background:var(--snow);border-radius:8px;padding:12px"><div style="font-family:'Space Mono',monospace;font-size:0.4rem;text-transform:uppercase;letter-spacing:0.14em;color:var(--mist);font-weight:700;margin-bottom:8px">Financial Liability (30d)</div><div style="font-size:0.63rem;color:var(--slate);line-height:2.1">CH₄ lost: <strong>${r.ch4t}t</strong><br>CO₂e: <strong>${r.co2eT}t</strong><br>Regulatory fine: <strong style="color:#b91c1c">$${fmt(r.fineUSD)}</strong><br>Total INR: <strong style="color:${c}">₹${(r.fineINR/1e5).toFixed(1)} Lakh</strong></div></div></div><div style="font-family:'Space Mono',monospace;font-size:0.4rem;color:rgba(10,10,9,0.2);text-align:center">Environment Protection Act 1986 · Air Act 1981 · ARGUS TWIST-1</div></div>`;g('rib-modal').classList.add('open');}
+function closeRIB(){g('rib-modal').classList.remove('open');}
+function updateNoise(val){S.noiseSigma=parseInt(val);g('noise-val').textContent=val;const pct=val/100,bar=g('noise-fill-bar');bar.style.width=pct*100+'%';bar.style.background=pct<0.3?'#3b82f6':pct<0.6?'#d97706':'#b91c1c';g('noise-status').textContent=val>0?`DENOISER: ACTIVE (σ=${val})`:'DENOISER: STANDBY';g('noise-slider-t2').value=val;syncNoiseDisplay(val);}
+function syncNoise(val){S.noiseSigma=parseInt(val);g('noise-slider').value=val;g('noise-val').textContent=val;const pct=val/100,bar=g('noise-fill-bar');bar.style.width=pct*100+'%';bar.style.background=pct<0.3?'#3b82f6':pct<0.6?'#d97706':'#b91c1c';g('noise-status').textContent=val>0?`DENOISER: ACTIVE (σ=${val})`:'DENOISER: STANDBY';syncNoiseDisplay(val);drawSignalCanvas();updateNoiseCharts(parseInt(val));}
+function syncNoiseDisplay(val){const sigma=parseInt(val);g('noise-display').textContent=sigma>0?`${sigma} (noisy)`:'0 (clean)';g('denoise-active-badge').style.display=sigma>0?'inline-flex':'none';const rawSNR=sigma>0?Math.max(2,22-sigma*0.20):Infinity;const denSNR=sigma>0?Math.max(8,rawSNR+sigma*0.14):Infinity;g('snr-raw').textContent=isFinite(rawSNR)?rawSNR.toFixed(1)+' dB':'∞ dB (clean)';g('snr-raw').style.color=sigma>0?(rawSNR<10?'#b91c1c':'#d97706'):'#15803d';g('snr-denoised').textContent=isFinite(denSNR)?denSNR.toFixed(1)+' dB':'∞ dB';g('snr-denoised').style.color='#15803d';g('snr-gain').textContent=sigma>0?'+'+(denSNR-rawSNR).toFixed(1)+' dB':'+0 dB';g('fp-reduction').textContent=Math.min(85,sigma*0.75).toFixed(0)+'%';g('noise-slider-t2').style.background=`linear-gradient(90deg,#7c3aed ${sigma}%,rgba(10,10,9,0.07) ${sigma}%)`;}
+function drawSignalCanvas(){const canvas=g('signal-canvas');if(!canvas)return;const ctx=canvas.getContext('2d');canvas.width=canvas.offsetWidth*(window.devicePixelRatio||1)||600;canvas.height=120*(window.devicePixelRatio||1);ctx.scale(window.devicePixelRatio||1,window.devicePixelRatio||1);const W=canvas.offsetWidth,H=120;ctx.clearRect(0,0,W,H);const N=200,trueSignal=[],noisySignal=[],denoisedSignal=[];for(let i=0;i<N;i++){const t=i/N*4*Math.PI,v=40+20*Math.sin(t)+8*Math.sin(3*t);trueSignal.push(v);noisySignal.push(v+randG(0,S.noiseSigma*v*0.01));}const w=5;for(let i=0;i<N;i++){const lo=Math.max(0,i-w),hi=Math.min(N-1,i+w);let mean=0,varr=0;for(let j=lo;j<=hi;j++)mean+=noisySignal[j];mean/=(hi-lo+1);for(let j=lo;j<=hi;j++)varr+=Math.pow(noisySignal[j]-mean,2);varr/=(hi-lo+1);const noiseVar=Math.pow(S.noiseSigma*mean*0.01,2);const gain=Math.max(0,varr-noiseVar)/Math.max(varr,noiseVar+1e-9);denoisedSignal.push(mean+gain*(noisySignal[i]-mean));}const allVals=[...trueSignal,...noisySignal,...denoisedSignal],minV=Math.min(...allVals),maxV=Math.max(...allVals);const scaleY=v=>H-8-(v-minV)/(maxV-minV+0.001)*(H-16);const drawLine=(sig,color,lw,dash=[])=>{ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=lw;ctx.setLineDash(dash);sig.forEach((v,i)=>{const x=i/N*W,y=scaleY(v);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});ctx.stroke();ctx.setLineDash([]);};if(S.noiseSigma>0){drawLine(noisySignal,'rgba(185,28,28,0.4)',1,[]);drawLine(denoisedSignal,'#15803d',2,[]);}drawLine(trueSignal,'rgba(29,78,216,0.55)',1.5,[4,3]);const dpr=window.devicePixelRatio||1;ctx.font=`${10*dpr}px 'Space Mono',monospace`;ctx.scale(1/dpr,1/dpr);ctx.fillStyle='#3b82f6';ctx.fillText('— True',8,14);if(S.noiseSigma>0){ctx.fillStyle='#b91c1c';ctx.fillText('— Noisy',80,14);ctx.fillStyle='#15803d';ctx.fillText('— Denoised',160,14);}}
+function updateNoiseCharts(sigma){destroy('denoise-impact-chart');const stages=['TROPOMI Ingest','Denoiser','ViT Segment','PINN Flux','TGAN Attr'];const fpR=sigma>0?[15,Math.max(2,15-sigma*0.13),8,4,2]:[15,15,8,4,2];const fpD=sigma>0?[15,Math.max(2,15-sigma*0.13),Math.max(1,8-sigma*0.06),4,2]:[15,15,8,4,2];S.charts['denoise-impact-chart']=new Chart(g('denoise-impact-chart').getContext('2d'),{type:'bar',data:{labels:stages,datasets:[{label:'FP Rate (no denoise)',data:fpR,backgroundColor:'rgba(185,28,28,0.55)',borderRadius:4,borderSkipped:false},{label:'FP Rate (with Wiener)',data:fpD,backgroundColor:'rgba(21,128,61,0.55)',borderRadius:4,borderSkipped:false}]},options:{plugins:{legend:{position:'bottom',labels:{font:{size:10}}}},scales:{x:{grid:{display:false},ticks:{font:{size:9}}},y:{grid:{color:'rgba(10,10,9,0.05)'},title:{display:true,text:'FP Rate (%)',font:{size:9}}}},animation:{duration:350}}});destroy('noise-dist-chart');const xs=[],ys=[];for(let x=-4;x<=4;x+=0.1){xs.push(x.toFixed(1));ys.push(Math.exp(-x*x/2)/Math.sqrt(2*Math.PI));}S.charts['noise-dist-chart']=new Chart(g('noise-dist-chart').getContext('2d'),{type:'line',data:{labels:xs,datasets:[{label:`N(0,${sigma||1})`,data:ys,borderColor:'#7c3aed',backgroundColor:'rgba(124,58,237,0.07)',fill:true,pointRadius:0,tension:0.4,borderWidth:2}]},options:{plugins:{legend:{display:false}},scales:{x:{grid:{color:'rgba(10,10,9,0.05)'},ticks:{font:{size:9},maxTicksLimit:9}},y:{grid:{color:'rgba(10,10,9,0.05)'},ticks:{font:{size:9}}}},animation:{duration:250}}});}
+function updateDenoiseLog(){if(!g('denoise-log'))return;g('denoise-log').innerHTML=S.denoiseLog.map(a=>`<tr><td style="font-family:'Space Mono',monospace;font-size:0.54rem;color:var(--mist)">${a.id}</td><td>${a.facility_name}</td><td style="color:var(--terra)">${a.flux_kg_hr.toFixed(1)}</td><td style="color:var(--crimson)">${a.rawSNR}</td><td style="color:var(--forest)">${a.denoisedSNR}</td><td style="color:#3b82f6;font-weight:700">+${Math.max(0,a.denoisedSNR-a.rawSNR).toFixed(1)}</td><td>${a.fp?`<span style="color:#d97706;font-size:0.52rem">${a.fp_reason}</span>`:'<span style="color:#15803d">✓ Passed</span>'}</td></tr>`).join('');}
+function renderAlerts(){
+  const all=[...S.synAlerts,...S.liveAlerts.map(a=>({...a,source:'api',fp:false}))];
+  const conf=all.filter(a=>!a.fp),fp=all.filter(a=>a.fp);const prec=all.length?((1-fp.length/all.length)*100).toFixed(1)+'%':'—';
+  g('alert-kpis').innerHTML=[['Total',all.length,'#c94e1a'],['Confirmed',conf.length,'#15803d'],['FP Filtered',fp.length,'#d97706'],['Precision',prec,'#1d4ed8']].map(([l,v,c])=>`<div style="background:white;border:1px solid var(--rule);border-radius:8px;padding:9px 13px;min-width:85px"><div style="font-family:'Space Mono',monospace;font-size:0.4rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--mist);margin-bottom:3px">${l}</div><div style="font-size:1rem;font-weight:800;color:${c}">${v}</div></div>`).join('');
+  if(conf.length){const rc={};conf.forEach(a=>{rc[a.risk]=(rc[a.risk]||0)+1;});destroy('alert-pie-chart');S.charts['alert-pie-chart']=new Chart(g('alert-pie-chart').getContext('2d'),{type:'doughnut',data:{labels:Object.keys(rc),datasets:[{data:Object.values(rc),backgroundColor:Object.keys(rc).map(r=>RISK_COLOR[r]+'cc'),borderColor:'#fff',borderWidth:3}]},options:{cutout:'65%',plugins:{legend:{position:'bottom',labels:{font:{size:10}}}},animation:{duration:350}}});destroy('alert-hist-chart');const fluxes=conf.map(a=>a.flux_kg_hr||0),bins=Array.from({length:14},(_,i)=>i*35),counts=bins.map((lo,i)=>fluxes.filter(f=>f>=lo&&f<(bins[i+1]||9999)).length);S.charts['alert-hist-chart']=new Chart(g('alert-hist-chart').getContext('2d'),{type:'bar',data:{labels:bins.map(b=>b+'kg'),datasets:[{data:counts,backgroundColor:'#c94e1acc',borderRadius:3,borderSkipped:false}]},options:{plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{font:{size:9}}},y:{grid:{color:'rgba(10,10,9,0.05)'},ticks:{font:{size:9}}}},animation:{duration:350}}});}
+  g('alert-feed').innerHTML=[...all].reverse().slice(0,40).map(a=>{const c=RISK_COLOR[a.risk]||'#888',bd=RISK_BD[a.risk]||'rgba(0,0,0,0.07)';return `<div class="alert-item" style="border-color:${a.fp?'rgba(10,10,9,0.09)':bd};border-left-color:${a.fp?'#888':c}"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div class="alert-time">${a.time||'—'} <span style="font-family:'Space Mono',monospace;font-size:0.42rem;background:rgba(59,130,246,0.07);color:#3b82f6;border:1px solid rgba(59,130,246,0.18);padding:1px 5px;border-radius:3px">${a.source==='api'?'API':'SYN'}</span></div><div class="alert-name" style="color:${a.fp?'var(--mist)':c}">${a.facility_name||'Unknown'}</div><div class="alert-meta">${a.operator||'?'} · Lat ${a.centroid_lat||'?'}, Lon ${a.centroid_lon||'?'}</div></div><div>${a.fp?`<span style="font-family:'Space Mono',monospace;font-size:0.5rem;color:var(--mist);border:1px solid rgba(10,10,9,0.12);padding:2px 7px;border-radius:4px">FP: ${a.fp_reason}</span>`:pill(a.risk)}</div></div>${!a.fp?`<div class="alert-grid"><div class="alert-stat"><div class="alert-stat-label">Flux</div><div class="alert-stat-value" style="color:#c94e1a">${(a.flux_kg_hr||0).toFixed(1)} kg/hr</div></div><div class="alert-stat"><div class="alert-stat-label">Confidence</div><div class="alert-stat-value" style="color:#15803d">${((a.confidence||0)*100).toFixed(1)}%</div></div><div class="alert-stat"><div class="alert-stat-label">Fine 30d</div><div class="alert-stat-value" style="color:#b91c1c">$${Math.round((a.flux_kg_hr||0)*720*80/1000*50).toLocaleString()}</div></div></div>`:''}</div>`;}).join('');
+}
+function renderSystem(){
+  const comps=[['FastAPI Backend',S.apiOnline,EP.health],['WebSocket Feed',S.wsConnected,S.wsConnected?'Connected':'Trying…'],['SSE Stream',S.sseConnected,S.sseConnected?'Connected':'Standby'],['Detections API',S.epAvail.detections,EP.detections],['Satellite Feed',S.satOnline,S.satOnline?'ONLINE':'OFFLINE (Twist 1)'],['Synthetic Engine',!S.satOnline||S.synAlerts.length>0,`${S.synAlerts.length} alerts`],['FP-Filter Agent',true,`${S.synFP} FP filtered`],['Brief Agent',S.ribs.length>0,`${S.ribs.length} RIBs drafted`],['Wiener Denoiser',true,S.noiseSigma>0?`σ=${S.noiseSigma} ACTIVE`:'standby'],['Satellite Data',true,'28 global emitters loaded'],['Leaflet Map',true,'CartoDB Positron · Clean light tiles'],['TROPOMI Ingester',true,'Sentinel-5P / mock']];
+  g('sys-components').innerHTML=comps.map(([n,ok,d])=>`<div class="sys-comp"><div style="display:flex;align-items:center;gap:8px"><div style="width:7px;height:7px;border-radius:50%;background:${ok?'#15803d':'#d97706'};box-shadow:0 0 0 3px ${ok?'rgba(21,128,61,0.14)':'rgba(217,119,6,0.14)'}"></div><div><div style="font-size:0.63rem;font-weight:600">${n}</div><div style="font-family:'Space Mono',monospace;font-size:0.44rem;color:var(--mist)">${d}</div></div></div><span style="font-family:'Space Mono',monospace;font-size:0.44rem;font-weight:700;color:${ok?'#15803d':'#d97706'}">${ok?'OK':'WARN'}</span></div>`).join('');
+  g('sys-timing').innerHTML=[['Health check',S.timing.health],['Detections fetch',S.timing.detections],['Total cycle',S.timing.total]].map(([n,ms])=>`<div class="sys-comp" style="margin-bottom:3px"><span style="font-size:0.6rem">${n}</span><span style="font-family:'Space Mono',monospace;font-size:0.58rem;color:${ms?ms<200?'#15803d':ms<1000?'#d97706':'#b91c1c':'#888'}">${ms!=null?ms+'ms':'—'}</span></div>`).join('');
+  g('sys-endpoints').innerHTML=[['Health',EP.health],['Detections',EP.detections],['Alerts',EP.alerts],['WS',EP.ws]].map(([n,url])=>`<div style="padding:5px 9px;border-radius:5px;margin-bottom:2px;background:white;border:1px solid var(--rule);font-family:'Space Mono',monospace;font-size:0.46rem;display:flex;justify-content:space-between;gap:7px"><span style="font-weight:700;color:var(--ink);white-space:nowrap">${n}</span><span style="color:var(--mist);text-overflow:ellipsis;overflow:hidden;white-space:nowrap">${url}</span></div>`).join('');
+}
+
+// ── BOOT ────────────────────────────────────────────────────────────────────
+(async function boot(){
+  seedMockData();
+  initMap();
+  renderAll();
+  g('conn-mode').textContent='🛰 SATELLITE';
+  g('last-update').textContent=`🛰 SAT ${timeNow()} · 28 det`;
+
+  setTimeout(()=>{updateNoiseCharts(0);drawSignalCanvas();},600);
+
+  g('lo-sub').textContent='Checking API…';
+  try{
+    const r=await Promise.race([
+      fetch(EP.health),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),5000))
+    ]);
+    S.apiOnline=r.ok;dotColor('dot-health',r.ok);
+  }catch{S.apiOnline=false;dotColor('dot-health',false);}
+  renderAPIStatus();
+
+  if(S.apiOnline){
+    g('lo-sub').textContent='Fetching live MongoDB data…';
+    await fetchDetections();
+    await Promise.allSettled([fetchAlerts(),fetchScorecard()]);
+    if(!S.wsConnected&&!S.sseConnected)tryWebSocket();
+    renderAll();
+    const connStr=S.wsConnected?'🔴 WS':S.sseConnected?'📡 SSE':'⏱ POLL';
+    g('last-update').textContent=`${connStr} ${timeNow()} · ${S.detections.length} det`;
+  }
+
+  g('loading-overlay').classList.add('hidden');
+  setInterval(()=>{if(S.apiOnline&&!S.wsConnected&&!S.sseConnected)doFetch();},30000);
+})();
+</script>
+</body>
+</html>

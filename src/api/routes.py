@@ -1,27 +1,31 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import time
 from datetime import datetime
-from typing import Annotated
+from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from loguru import logger
-from src.db.mongo import get_async_db
 
-
+from src.db.mongo import get_async_db, get_sync_db
 from src.pipeline.orchestrator import ARGUSPipeline, RunStore
 from src.pipeline.scheduler import PipelineScheduler
 from src.agents.active_learning import ActiveLearningQueue
 from src.utils.config import cfg
 
-router   = APIRouter()
-store    = RunStore()
-al_queue = ActiveLearningQueue()
+router    = APIRouter()
+ws_router = APIRouter()
+store     = RunStore()
+al_queue  = ActiveLearningQueue()
 
-# Single shared pipeline instance (loaded once at startup)
 _pipeline: ARGUSPipeline | None = None
 
+
+# ── Pipeline ────────────────────────────────────────────────────────────────
 
 def get_pipeline() -> ARGUSPipeline:
     global _pipeline
@@ -30,14 +34,14 @@ def get_pipeline() -> ARGUSPipeline:
     return _pipeline
 
 
-# ── Request / Response schemas ────────────────────────────────────────────────
+# ── Schemas ─────────────────────────────────────────────────────────────────
 
 class DetectRequest(BaseModel):
-    lat_min: float = Field(..., ge=-90,  le=90,  description="Southern latitude bound")
-    lat_max: float = Field(..., ge=-90,  le=90,  description="Northern latitude bound")
-    lon_min: float = Field(..., ge=-180, le=180, description="Western longitude bound")
-    lon_max: float = Field(..., ge=-180, le=180, description="Eastern longitude bound")
-    date:    str | None = Field(None, description="ISO date string e.g. 2024-06-01")
+    lat_min: float = Field(..., ge=-90, le=90)
+    lat_max: float = Field(..., ge=-90, le=90)
+    lon_min: float = Field(..., ge=-180, le=180)
+    lon_max: float = Field(..., ge=-180, le=180)
+    date: str | None = None
 
     @field_validator("lat_max")
     @classmethod
@@ -56,30 +60,112 @@ class DetectRequest(BaseModel):
 
 class ReviewLabelRequest(BaseModel):
     detection_id: int
-    run_id:       str
-    is_plume:     bool
-    reviewer:     str = "human_expert"
-    notes:        str = ""
+    run_id: str
+    is_plume: bool
+    reviewer: str = "human_expert"
+    notes: str = ""
 
 
-# ── Core detection endpoint (required by problem statement) ───────────────────
+# ── Helpers ─────────────────────────────────────────────────────────────────
 
-@router.post("/detect", tags=["Detection"])
-async def detect(
-    req:              DetectRequest,
-    background_tasks: BackgroundTasks,
-) -> dict:
-    """
-    **Primary endpoint** — accepts a geographic bounding box and returns
-    all detected methane plumes with flux estimates and source attribution.
+PROJECTION = {"_id": 0, "cls_embedding": 0, "raw_spectra": 0, "pixel_mask": 0}
 
-    This is the exact endpoint format required by the EN02 problem statement.
-    """
-    t0 = time.perf_counter()
+def _flux_to_risk(flux: float) -> str:
+    if flux >= 300: return "CRITICAL"
+    if flux >= 100: return "HIGH"
+    if flux >= 40: return "MEDIUM"
+    return "LOW"
+
+
+def _normalise_detection(d: dict) -> dict:
+    if "attribution" in d and isinstance(d["attribution"], dict):
+        return d
+
+    return {
+        "detection_id": d.get("detection_id") or d.get("label_id"),
+        "centroid_lat": d.get("centroid_lat"),
+        "centroid_lon": d.get("centroid_lon"),
+        "flux_kg_hr": d.get("flux_kg_hr", 0),
+        "co2e_kg_hr": d.get("co2e_kg_hr", d.get("flux_kg_hr", 0) * 80),
+        "confidence": d.get("mean_probability", d.get("confidence", 0)),
+        "epistemic_variance": d.get("epistemic_variance", 0),
+        "high_confidence": d.get("high_confidence", False),
+        "run_id": d.get("run_id"),
+        "timestamp": d.get("timestamp"),
+        "bbox": d.get("bbox", {}),
+        "attribution": {
+            "facility_id": d.get("facility_id", ""),
+            "facility_name": d.get("facility_name", ""),
+            "operator": d.get("operator", ""),
+            "facility_type": d.get("facility_type", ""),
+            "distance_km": d.get("distance_km", 0),
+            "confidence": d.get("attribution_confidence", 0),
+        },
+        "enforcement": {
+            "notice_id": d.get("notice_id", ""),
+            "risk_level": d.get("risk_level", ""),
+        },
+        "economics": d.get("economics", {}),
+    }
+
+
+def _ensure_indexes():
+    try:
+        db = get_sync_db()
+        db.detections.create_index([("timestamp", -1)], background=True)
+        db.runs.create_index([("timestamp", -1)], background=True)
+        logger.info("MongoDB indexes ensured")
+    except Exception as e:
+        logger.warning(f"Index creation failed: {e}")
+
+
+_ensure_indexes()
+
+
+# ── SAFE Mongo Fetch ─────────────────────────────────────────────────────────
+
+async def _async_fetch(collection: str, limit: int) -> list:
+    try:
+        db = get_async_db()
+
+        cursor = (
+            getattr(db, collection)
+            .find({}, PROJECTION)
+            .sort("timestamp", -1)
+            .limit(limit)
+        )
+
+        return await cursor.to_list(length=limit)
+
+    except Exception as e:
+        logger.warning(f"Mongo fetch failed ({collection}): {e}")
+        return []   # ✅ NEVER CRASH
+
+
+async def _async_fetch_heatmap(n_runs: int):
+    db = get_async_db()
 
     try:
-        date_obj = datetime.fromisoformat(req.date) if req.date else None
+        dets = await asyncio.wait_for(
+            db.detections.find({}, PROJECTION).limit(100).to_list(100), timeout=10
+        )
+        runs = await asyncio.wait_for(
+            db.runs.find({}, {"_id": 0}).limit(n_runs).to_list(n_runs), timeout=10
+        )
+        return dets, runs
+
+    except Exception as e:
+        logger.warning(f"Heatmap fetch failed: {e}")
+        return [], []
+
+
+# ── Detect ───────────────────────────────────────────────────────────────────
+
+@router.post("/detect")
+async def detect(req: DetectRequest, background_tasks: BackgroundTasks):
+    try:
         pipeline = get_pipeline()
+        date_obj = datetime.fromisoformat(req.date) if req.date else None
 
         result = pipeline.run(
             lat_min=req.lat_min,
@@ -89,170 +175,92 @@ async def detect(
             date=date_obj,
         )
 
-        # Persist result in background so response is not blocked
         background_tasks.add_task(store.save, result)
 
-        logger.info(
-            f"API /detect: {result.n_super_emitters} super-emitters | "
-            f"{time.perf_counter()-t0:.2f}s"
-        )
         return result.to_api_dict()
 
     except Exception as e:
-        logger.error(f"API /detect error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ── Historical heatmap data ───────────────────────────────────────────────────
+# ── Detections ───────────────────────────────────────────────────────────────
 
-@router.get("/heatmap")
-async def heatmap(n_runs: int = 100):
-    db = get_async_db()
-    detections = await db.detections.find(
-        {}, {"_id": 0}
-    ).sort("timestamp", -1).limit(500).to_list(500)
+@router.get("/detections")
+async def detections(limit: int = 50):
+    dets = await _async_fetch("detections", limit)
 
-    runs = await db.runs.find(
-        {}, {"_id": 0}
-    ).sort("timestamp", -1).limit(n_runs).to_list(n_runs)
+    if not dets:
+        dets = store.load_all_detections()[-limit:]
 
     return {
-        "total_detections": len(detections),
-        "detections":       detections,
-        "runs_summary": [
-            {
-                "run_id":           r["run_id"],
-                "timestamp":        r["timestamp"],
-                "n_super_emitters": r["summary"]["n_super_emitters"],
-                "total_flux_kg_hr": r["summary"]["total_flux_kg_hr"],
-                "total_impact_usd": r["summary"]["total_impact_usd"],
-            }
-            for r in runs
-        ],
+        "detections": [_normalise_detection(d) for d in dets],
+        "total": len(dets),
     }
 
 
+# ── Alerts ───────────────────────────────────────────────────────────────────
 
-# ── Facility risk scorecard ───────────────────────────────────────────────────
+@router.get("/alerts")
+async def alerts(limit: int = 50):
+    raw = await _async_fetch("detections", 50)
 
-@router.get("/scorecard")
-async def scorecard(limit: int = 50):
-    db    = get_async_db()
-    cards = await db.scorecard.find(
-        {}, {"_id": 0}
-    ).sort("compliance_score", 1).limit(limit).to_list(limit)
+    if not raw:
+        raw = store.load_all_detections()[-50:]
 
-    return {
-        "total_facilities": len(cards),
-        "scorecard":        cards,
-        "generated_at":     datetime.utcnow().isoformat(),
-    }
+    normalised = [_normalise_detection(d) for d in raw]
 
+    alerts = []
+    for d in normalised:
+        flux = d.get("flux_kg_hr", 0)
+        risk = d["enforcement"]["risk_level"] or _flux_to_risk(flux)
 
-# ── Per-facility detail ───────────────────────────────────────────────────────
+        alerts.append({
+            "id": f"ALERT-{str(d.get('detection_id', 0)).zfill(4)}",
+            "facility_name": d["attribution"]["facility_name"],
+            "risk": risk,
+            "flux_kg_hr": flux,
+        })
 
-@router.get("/facility/{facility_id}", tags=["Facilities"])
-async def facility_detail(facility_id: str) -> dict:
-    """Full profile + detection history for a single facility."""
-    from src.data.facility_db import get_facility_by_id
-
-    record = get_facility_by_id(facility_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail=f"Facility {facility_id} not found")
-
-    # Attach detection history from run store
-    all_dets = store.load_all_detections()
-    fac_dets = [
-        d for d in all_dets
-        if d.get("attribution", {}).get("facility_id") == facility_id
-    ]
-
-    record["detection_history"] = fac_dets
-    record["n_detections"]      = len(fac_dets)
-    record["total_flux_kg_hr"]  = sum(
-        d.get("flux_kg_hr", 0) for d in fac_dets
-    )
-    return record
+    return {"alerts": alerts[:limit]}
 
 
-# ── Active learning review queue ──────────────────────────────────────────────
+# ── Stream ───────────────────────────────────────────────────────────────────
 
-@router.get("/review-queue", tags=["Active Learning"])
-async def review_queue() -> dict:
-    """Returns all uncertain detections awaiting human expert review."""
-    queue = al_queue.load_queue()
-    curve = al_queue.learning_curve()
-    return {
-        "queue_size":     len(queue),
-        "items":          queue,
-        "learning_curve": curve,
-    }
+@router.get("/stream")
+async def stream():
+    async def generator():
+        while True:
+            dets = await _async_fetch("detections", 50)
+            if not dets:
+                dets = store.load_all_detections()[-50:]
 
+            yield f"data: {json.dumps(dets)}\n\n"
+            await asyncio.sleep(60)
 
-@router.post("/review-queue/label", tags=["Active Learning"])
-async def submit_label(req: ReviewLabelRequest) -> dict:
-    """
-    Submit a human expert label for a queued detection.
-    Labels are written to the training data directory for Stage 1 retraining.
-    """
-    import json
-    from pathlib import Path
-
-    label_path = Path("data/active_learning/labels.jsonl")
-    label_path.parent.mkdir(parents=True, exist_ok=True)
-
-    record = {
-        "detection_id": req.detection_id,
-        "run_id":       req.run_id,
-        "is_plume":     req.is_plume,
-        "reviewer":     req.reviewer,
-        "notes":        req.notes,
-        "labeled_at":   datetime.utcnow().isoformat(),
-    }
-
-    with open(label_path, "a") as f:
-        f.write(json.dumps(record) + "\n")
-
-    logger.info(
-        f"API /review-queue/label: "
-        f"det={req.detection_id} | is_plume={req.is_plume} | by={req.reviewer}"
-    )
-    return {"status": "accepted", "record": record}
+    return StreamingResponse(generator(), media_type="text/event-stream")
 
 
-# ── Economic impact summary ───────────────────────────────────────────────────
+# ── WebSocket ────────────────────────────────────────────────────────────────
 
-@router.get("/economic-summary", tags=["Intelligence"])
-async def economic_summary() -> dict:
-    """
-    Aggregates total economic impact across all recent runs.
-    This feeds the live economic ticker on the dashboard.
-    """
-    runs = store.load_recent(n=100)
+@ws_router.websocket("/ws/detections")
+async def ws(websocket: WebSocket):
+    await websocket.accept()
 
-    total_usd = sum(r["summary"]["total_impact_usd"] for r in runs)
-    total_inr = total_usd * 83.5
-    total_flux = sum(r["summary"]["total_flux_kg_hr"] for r in runs)
-    total_super = sum(r["summary"]["n_super_emitters"] for r in runs)
+    try:
+        while True:
+            dets = await _async_fetch("detections", 50)
+            if not dets:
+                dets = store.load_all_detections()[-50:]
 
-    return {
-        "total_runs":           len(runs),
-        "total_super_emitters": total_super,
-        "total_flux_kg_hr":     round(total_flux, 2),
-        "total_impact_usd":     round(total_usd, 2),
-        "total_impact_inr":     round(total_inr, 2),
-        "total_impact_inr_cr":  round(total_inr / 1e7, 3),
-        "as_of":                datetime.utcnow().isoformat(),
-    }
+            await websocket.send_json(dets)
+            await asyncio.sleep(60)
+
+    except WebSocketDisconnect:
+        pass
 
 
-# ── Health check ──────────────────────────────────────────────────────────────
+# ── Health ───────────────────────────────────────────────────────────────────
 
-@router.get("/health", tags=["System"])
-async def health() -> dict:
-    return {
-        "status":   "ok",
-        "version":  "1.0.0",
-        "model":    "ARGUS",
-        "time":     datetime.utcnow().isoformat(),
-    }
+@router.get("/health")
+async def health():
+    return {"status": "ok"}

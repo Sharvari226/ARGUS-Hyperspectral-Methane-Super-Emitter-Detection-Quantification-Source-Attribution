@@ -217,11 +217,13 @@ class ARGUSPipeline:
         try:
             tensor     = preprocess_tropomi(ds_tropomi).to(self.device)
             seg_out    = mc_predict(self.stage1, tensor, device=self.device)
+            # Stage 1 block — replace the extract_plume_detections call
             detections = extract_plume_detections(
                 mask_mean=seg_out.mask_mean.squeeze(0),
                 mask_var =seg_out.mask_variance.squeeze(0),
                 lat_min=lat_min, lat_max=lat_max,
                 lon_min=lon_min, lon_max=lon_max,
+                raw_ch4=ds_tropomi["methane_mixing_ratio_bias_corrected"].values,  # ← add this
             )
             emb = seg_out.embeddings.squeeze(0).cpu().numpy()
             for det in detections:
